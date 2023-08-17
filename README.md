@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ```
 
 ## 2. Runing the model
-Run the model by doing:
+Running the model in a CLI can be done but without a graphical interface, the final graph will not be displayed. To display the graph, run it in an enviroment with graphics driver:
 ```
 python stock_prediction.py
 ```
