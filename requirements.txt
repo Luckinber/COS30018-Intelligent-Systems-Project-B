@@ -1,7 +1,7 @@
 numpy
 matplotlib
 pandas
-pandas_datareader
-datetime
 tensorflow
+scikit-learn
+pandas-datareader
 yfinance
