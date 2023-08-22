@@ -1,14 +1,11 @@
 # COS30018-Intelligent-Systems-Project-B
 
 ## 1. Prepare Environment
-Clone the repo and open a cli in the directory, ensure [Python](https://pip.pypa.io/en/stable/installation/) and [Pip](https://pip.pypa.io/en/stable/installation/) are installed then create a python virtual enviroment:
-
+Clone the repo and open a cli in the directory, ensure [Python](https://pip.pypa.io/en/stable/installation/) and [Pip](https://pip.pypa.io/en/stable/installation/) are installed then create a python virtual environment:
 ```bash
 python -m venv venv
 ```
-
 To use the venv, it must be sourced
-
 ```bash
 # Windows
 venv\Scripts\activate
