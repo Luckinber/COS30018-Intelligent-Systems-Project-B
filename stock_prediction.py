@@ -29,9 +29,8 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
-from collections import deque
 
-def load_data(company, start_date, end_date, predict_window=50, save=True, refresh=True, data_dir='data', scale=True, shuffle=True, prediction_days=60, split_by_date=True,
+def load_data(company, start_date, end_date, predict_window=60, save=True, refresh=True, data_dir='data', scale=True, shuffle=True, prediction_days=60, split_by_date=True,
                 test_size=0.2, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Loads data from Yahoo Finance source, as well as scaling, shuffling, normalizing and splitting.
     # Params:
@@ -45,10 +44,10 @@ def load_data(company, start_date, end_date, predict_window=50, save=True, refre
 	# 	scale 			(bool)	: Whether to scale prices from 0 to 1, default is True
 	#	shuffle 		(bool)	: Whether to shuffle the dataset (both training & testing), default is True
 	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g next day)
-	# 	split_by_date 	(bool)	: whether we split the dataset into training/testing by date, setting it 
+	# 	split_by_date 	(bool)	: Whether we split the dataset into training/testing by date, setting it 
 	# 		to False will split datasets in a random way
-	# 	test_size 		(float)	: ratio for test data, default is 0.2 (20% testing data)
-	# 	feature_columns	(list)	: the list of features to use to feed into the model, default is everything grabbed from yahoo_fin
+	# 	test_size 		(float)	: Ratio for test data, default is 0.2 (20% testing data)
+	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
 
 
 	# Creates data directory if it doesn't exist
@@ -70,34 +69,45 @@ def load_data(company, start_date, end_date, predict_window=50, save=True, refre
 		if save:
 			df.to_csv(df_file_path)
 
-	# make sure that the passed feature_columns exist in the dataframe
-	for col in feature_columns:
-		assert col in df.columns, f'{col} does noxt exist in the dataframe.'
-	
 	# Create dataset dictionary to store outputs
 	dataset = {}
     # Store the original dataframe itself
 	dataset['df'] = df.copy()
 
-	# For more details:
+	# make sure that the passed feature_columns exist in the dataframe
+	for col in feature_columns:
+		assert col in df.columns, f'{col} does noxt exist in the dataframe.'
+
+	# # I DON'T UNDERSTAND THIS MAY RETURN IT
+	# # Add date as a column
+	# if 'Date' not in df.columns:
+	# 	df["Date"] = df.index
+	
+	# Drop NaNs
+	df.dropna(inplace=True)
+
+	# For more details: 
 	# https://pandas.pydata.org/pandas-docs/stable/user_guide/dsintro.html
 	#------------------------------------------------------------------------------
 	# Prepare Data
 	## To do:
 	# 1) Use a different price value eg. mid-point of Open & Close
-	# 2) Change the Prediction days
 	#------------------------------------------------------------------------------
-	
+
+	# If scale is set, scale all date
 	if scale:
+		# Dict to store the scaler for each column
 		column_scaler = {}
+		column_x, column_y = {}, {}
 		for column in feature_columns:
-			scaler = MinMaxScaler(feature_range=(0, 1))
+			# Scaling each feature_column from 0 to 1
 			# Note that, by default, feature_range=(0, 1). Thus, if you want a different 
 			# 	feature_range (min,max) then you'll need to specify it here
-			df[column] = scaler.fit_transform(df[column].values.reshape(-1, 1)) 
-			# Flatten and normalise the data
+			scaler = MinMaxScaler(feature_range=(0, 1))
+			# Flatten and normalise the df
 			# First, we reshape a 1D array(n) to 2D array(n,1)
-			# We have to do that because sklearn.preprocessing.fit_transform() requires a 2D array
+			# We have to do that because sklearn.preprocessing.fit_transform()
+			# requires a 2D array
 			# Here n == len(scaled_data)
 			# Then, we scale the whole array to the range (0,1)
 			# The parameter -1 allows (np.)reshape to figure out the array size n automatically 
@@ -108,70 +118,38 @@ def load_data(company, start_date, end_date, predict_window=50, save=True, refre
 			# When using a -1, the dimension corresponding to the -1 will be the product of 
 			# 	the dimensions of the original array divided by the product of the dimensions 
 			# 	given to reshape so as to maintain the same number of elements.
+			scaled_data = scaler.fit_transform(df[column].values.reshape(-1, 1))
+			# Save scalar used
 			column_scaler[column] = scaler
+			# Turn the 2D array back to a 1D array
+			scaled_data = scaled_data[:,0]
 
-		# Add the MinMaxScaler instances to the result returned
-		dataset['column_scaler'] = column_scaler
 
-	# Add the target column (label) by shifting by `prediction_days`
-	df['future'] = df['Adj Close'].shift(-prediction_days)
-	# last `prediction_days` columns contains NaN in future column
-    # 	get them before droping NaNs
-	last_sequence = np.array(df[feature_columns].tail(prediction_days))
+			# Arrays for x and y data
+			x, y = [], []
 
-	# Drop NaNs
-	df.dropna(inplace=True)
+			# Prepare the data
+			for i in range(predict_window, len(scaled_data)):
+				# Offset x and y data by predict_window
+				x.append(scaled_data[i-predict_window:i])
+				y.append(scaled_data[i])
+				
+			# Convert them into an array
+			x, y = np.array(x), np.array(y)
+			# Now, x_train is a 2D array(p,q) where p = len(scaled_data) - predict_window
+			# and q = predict_window; while y_train is a 1D array(p)
 
-	sequence_data = []
-	sequences = deque(maxlen=predict_window)
+			# We now reshape x_train into a 3D array(p, q, 1); Note that x_train 
+			# is an array of p inputs with each input being a 2D array
+			x = np.reshape(x, (x.shape[0], x.shape[1], 1))
 
-	for entry, target in zip(df[feature_columns].values, df['future'].values):
-		sequences.append(entry)
-		if len(sequences) == predict_window:
-			sequence_data.append([np.array(sequences), target])
+			# Add x and y to dict to hold them
+			column_x[column], column_y[column] = x, y
 
-	# Get the last sequence by appending the last `predict_window` sequence with `prediction_days` sequence
-	# 	for instance, if predict_window=50 and prediction_days=10, last_sequence should be of 60 (that is 50+10) length
-	# this last_sequence will be used to predict future stock prices that are not available in the dataset
-	last_sequence = list([s[:len(feature_columns)] for s in sequences]) + list(last_sequence)
-	last_sequence = np.array(last_sequence).astype(np.float32)
-	# add to dataset
-	dataset['last_sequence'] = last_sequence
-
-	# To store the training and test data
-	x, y = [], []
-	for seq, target in sequence_data:
-		x.append(seq)
-		y.append(target)
-
-	# Convert to numpy arrays
-	x = np.array(x)
-	y = np.array(y)
-
-	if split_by_date:
-		# Split the dataset into training and testing sets by date
-		train_samples = int((1 - test_size) * len(x))
-		dataset['x_train'] = x[:train_samples]
-		dataset['y_train'] = y[:train_samples]
-		dataset['x_test']  = x[train_samples:]
-		dataset['y_test']  = y[train_samples:]
-		# if shuffle:
-		# 	# Shuffle the dataset for training
-		# 	shuffle_in_unison(dataset['x_train'], dataset['y_train'])
-		# 	shuffle_in_unison(dataset['x_test'], dataset['y_test'])
-	else:
-		# Split dataset randomly
-		dataset['x_train'], dataset['y_train'], dataset['x_test'], dataset['y_test'] = train_test_split(x, y, test_size=test_size, shuffle=True)
-	
-	# # Get the list of test set dates
-	# dates = dataset['x_test'][:, -1, -1]
-	# # Retrieve test features from the original dataframe
-	# dataset['test_df'] = dataset['df'].loc[Dates]
-	# # Remove duplicated dates in the testing dataframe
-	# dataset['test_df'] = dataset["test_df"][~dataset['test_df'].index.duplicated(keep='first')]
-	# # Remove dates from the training/testing sets & convert to float32
-	# dataset['x_train'] = dataset['x_train'][:, :, :len(feature_columns)].astype(np.float32)
-	# dataset['x_test'] = dataset['x_test'][:, :, :len(feature_columns)].astype(np.float32)
+		# Add the MinMaxScaler instances to the dataset
+		dataset["column_scaler"] = column_scaler
+		# Add the scaled data instanced to the dataset
+		dataset['column_x'], dataset['column_y'] = column_x, column_y
 
 	return dataset
 
@@ -258,20 +236,20 @@ def build_model(x_train, y_train):
 
 	return model
 
-def parse_test_data(company, start_date, end_date, data_dir, price_value, prediction_days, scaler):
+def parse_test_data(company, start_date, end_date, price_value, prediction_days, scaler, df):
 	#------------------------------------------------------------------------------
 	# Test the model accuracy on existing data
 	#------------------------------------------------------------------------------
 	
 	# Load the test data
-	test_data = load_data(company, start_date, end_date, data_dir)
+	test_data = yf.download(company, start=start_date, end=end_date, progress=False)
 
 	# The above bug is the reason for the following line of code
 	test_data = test_data[1:]
 
 	actual_prices = test_data[price_value].values
 
-	total_dataset = pd.concat((data[price_value], test_data[price_value]), axis=0)
+	total_dataset = pd.concat((df[price_value], test_data[price_value]), axis=0)
 
 	model_inputs = total_dataset[len(total_dataset) - len(test_data) - prediction_days:].values
 	# We need to do the above because to predict the closing price of the fisrt
@@ -359,13 +337,12 @@ def predict(prediction_days, model_inputs, model, scaler, actual_prices):
 
 if __name__ == '__main__':
 	COMPANY = 'TSLA'
-	TRAIN_START = '2015-01-01'
-	TRAIN_END = '2020-01-01'
-	PRICE_VALUE = 'Close'
+	START_DATE = '2015-01-01'
+	END_DATE = '2020-01-01'
+	PREDICTION_DAYS = 60
 	TEST_START = '2020-01-02'
 	TEST_END = '2022-12-31'
-	PREDICTION_DAYS = 60
-	dataset = load_data(COMPANY, TRAIN_START, TRAIN_END)
-	model = build_model(dataset['x_train'], dataset['y_train'])
-	# model_inputs, actual_prices = parse_test_data(COMPANY, TEST_START, TEST_END, 'data', PRICE_VALUE, PREDICTION_DAYS, scaler)
-	# predict(PREDICTION_DAYS, model_inputs, model, scaler, actual_prices)
+	dataset = load_data(COMPANY, START_DATE, END_DATE, PREDICTION_DAYS)
+	model = build_model(dataset['column_x']['Open'], dataset['column_y']['Open'])
+	model_inputs, actual_prices = parse_test_data(COMPANY, TEST_START, TEST_END, 'Open', PREDICTION_DAYS, dataset['column_scaler']['Open'], dataset['df'])
+	predict(PREDICTION_DAYS, model_inputs, model, dataset['column_scaler']['Open'], actual_prices)
