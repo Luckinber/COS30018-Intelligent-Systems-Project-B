@@ -68,19 +68,14 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 		if save:
 			df.to_csv(df_file_path)
 
-	# Create dataset dictionary to store outputs
-	dataset = {}
-    # Store the original dataframe itself
-	dataset['df'] = df.copy()
-
 	# make sure that the passed feature_columns exist in the dataframe
 	for col in feature_columns:
 		assert col in df.columns, f'{col} does noxt exist in the dataframe.'
 
-	# # I DON'T UNDERSTAND THIS MAY RETURN IT
-	# # Add date as a column
-	# if 'Date' not in df.columns:
-	# 	df["Date"] = df.index
+	# Create dataset dictionary to store outputs
+	dataset = {}
+    # Store the original dataframe itself
+	dataset['df'] = df.copy()
 	
 	# Drop NaNs
 	df.dropna(inplace=True)
@@ -93,21 +88,30 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 	# 1) Use a different price value eg. mid-point of Open & Close
 	#------------------------------------------------------------------------------
 
-
+	# Create dicts to store verions of each value for feature_columns
 	column_x_train, column_y_train = {}, {}
-	# Dict to store the scaler for each column
 	column_scaler = {}
-	actual_prices = {}
+	column_actual_prices = {}
 	column_model_inputs = {}
+
 	for column in feature_columns:
+		# Create arrays for train and test data
 		train, test = [], []
 		
+		# If split_by_date is true, split the dataframe into training and testing data on a date
+		# THIS IS BROKEN FIX IT
 		if split_by_date:
+			# train contains all values before test_start_date
 			train = df[column][df.index < test_start_date]
+			# test contains all values after test_start_date
 			test = df[column][df.index >= test_start_date]
+		# If split_by_date is false, split the dataframe into training and testing based on percentage
 		else:
+			# Convert the test_size percentage to a index
 			train_start = int((1 - test_size) * len(df[column]))
+			# train contains all values before that index
 			train = df[column][:train_start]
+			# test contains all values after that index
 			test = df[column][train_start:]
 
 		# Scaling each feature_column from 0 to 1
@@ -153,19 +157,24 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 		# is an array of p inputs with each input being a 2D array
 		x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
 
+		# Store the training data in the dicts under the name of the feature_column
 		column_x_train[column], column_y_train[column] = x_train, y_train
 
-		actual_prices[column] = test.values
+		# Store the actual_prices in the dicts under the name of the feature_column
+		column_actual_prices[column] = test.values
 
-		total_dataset = pd.concat((train, test), axis=0)
-		model_inputs = total_dataset[len(total_dataset) - len(test) - prediction_days:].values
+		# Create the inputs which is the amount of prediction_days and all the test data
+		model_inputs = df[column][len(df[column]) - len(test) - prediction_days:].values
+		# Store the model_inputs in the dicts under the name of the feature_column
 		column_model_inputs[column] = scaler.transform(model_inputs.reshape(-1, 1))
 
 	# Add the MinMaxScaler instances to the dataset
 	dataset["column_scaler"] = column_scaler
-	# Add the scaled data instances to the dataset
+	# Add the training data instances to the dataset
 	dataset['column_x_train'], dataset['column_y_train'] = column_x_train, column_y_train
-	dataset['actual_prices'] = actual_prices
+	# Add the actual_prices instances to the dataset
+	dataset['column_actual_prices'] = column_actual_prices
+	# Add the model_inputs instances to the dataset
 	dataset['column_model_inputs'] = column_model_inputs
 
 	return dataset
@@ -314,10 +323,14 @@ def predict(model, model_inputs, scaler, actual_prices, prediction_days = 60):
 	# Can you combine these different techniques for a better prediction??
 
 if __name__ == '__main__':
+	# Defualt params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
 	END_DATE = '2022-12-31'
 	PRICE_VALUE = 'Close'
+	# Generate the dataset based on the company and the dates
 	dataset = load_data(COMPANY, START_DATE, END_DATE)
+	# Generate the model based on the training data
 	model = build_model(dataset['column_x_train'][PRICE_VALUE], dataset['column_y_train'][PRICE_VALUE])
-	predict(model, dataset['column_model_inputs'][PRICE_VALUE], dataset['column_scaler'][PRICE_VALUE], dataset['actual_prices'][PRICE_VALUE])
+	# Run the predictions based on the model and testing data
+	predict(model, dataset['column_model_inputs'][PRICE_VALUE], dataset['column_scaler'][PRICE_VALUE], dataset['column_actual_prices'][PRICE_VALUE])
