@@ -30,19 +30,19 @@ from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
 
-def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='data', prediction_days=60, predict_window=60,
+def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='data', prediction_days=60, prediction_window=60,
 				split_by_date=False, test_start_date='2020-01-01', test_size=0.2,
 				feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
-	# Loads data from Yahoo Finance source, as well as scaling, shuffling, normalizing and splitting.
+	# Loads data from Yahoo Finance source, as well as scaling, normalizing and splitting.
     # Params:
 	# 	company			(str)	: The company you want to train on, examples include AAPL, TESL, etc.
 	#	start_date		(str)	: The start date for the data
 	#	end_date		(str)	: The end date for the data
 	#	save			(bool)	: Whether to save the data locally if it doesn't already exist, default is True
-	#	refresh			(boool)	: Whether to redownload data even if it exists, defualt is True
+	#	refresh			(bool)	: Whether to redownload data even if it exists, default is True
 	#	data_dir		(str)	: Directory to store data, default is 'data'
-	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g next day)
-	#	predict_window	(int)	: The historical sequence length used to predict, default is 50
+	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g in 60 days)
+	#	prediction_window	(int)	: The historical sequence length used to predict, default is 60
 	# 	split_by_date 	(bool)	: Whether we split the dataset into training/testing by date, setting it 
 	# 		to False will split datasets base on test_size
 	# 	test_size 		(float)	: Ratio for test data, default is 0.2 (20% testing data)
@@ -143,15 +143,15 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 		x_train, y_train = [], []
 
 		# Prepare the data
-		for i in range(predict_window, len(scaled_data)):
-			# Offset x and y data by predict_window
-			x_train.append(scaled_data[i-predict_window:i])
+		for i in range(prediction_window, len(scaled_data)):
+			# Offset x and y data by prediction_window
+			x_train.append(scaled_data[i-prediction_window:i])
 			y_train.append(scaled_data[i])
 			
 		# Convert them into an array
 		x_train, y_train = np.array(x_train), np.array(y_train)
-		# Now, x is a 2D array(p,q) where p = len(scaled_data) - predict_window
-		# and q = predict_window; while y is a 1D array(p)
+		# Now, x is a 2D array(p,q) where p = len(scaled_data) - prediction_window
+		# and q = prediction_window; while y is a 1D array(p)
 
 		# We now reshape x into a 3D array(p, q, 1); Note that x
 		# is an array of p inputs with each input being a 2D array
@@ -180,13 +180,15 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 	return dataset
 
 def build_model(x_train, y_train):
+	# Builds the model
+	# Params:
+	# 	x_train	(list)	:	The x training data
+	# 	y_train	(list)	:	The y training data
+	
 	#------------------------------------------------------------------------------
 	# Build the Model
 	## TO DO:
-	# 1) Check if data has been built before. 
-	# If so, load the saved data
-	# If not, save the data into a directory
-	# 2) Change the model to increase accuracy?
+	# 1) Change the model to increase accuracy?
 	#------------------------------------------------------------------------------
 	model = Sequential() # Basic neural network
 	# See: https://www.tensorflow.org/api_docs/python/tf/keras/Sequential
@@ -263,6 +265,14 @@ def build_model(x_train, y_train):
 	return model
 
 def predict(model, model_inputs, scaler, actual_prices, prediction_days = 60):
+	# Uses model and data to make prediction
+	# Params:
+	# 	model					: The model previously generated to actually be tested
+	# 	model_inputs			: The test data to be used for prediction
+	# 	scaler					: The scaler used to process the data so it can be de-normalised
+	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
+	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g in 60 days)
+
 	#------------------------------------------------------------------------------
 	# Make predictions on test data
 	#------------------------------------------------------------------------------
@@ -323,7 +333,7 @@ def predict(model, model_inputs, scaler, actual_prices, prediction_days = 60):
 	# Can you combine these different techniques for a better prediction??
 
 if __name__ == '__main__':
-	# Defualt params that must be set
+	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
 	END_DATE = '2022-12-31'
