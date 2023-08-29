@@ -30,23 +30,23 @@ from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
 
-def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='data', prediction_days=60, prediction_window=60,
-				split_by_date=False, test_start_date='2020-01-01', test_size=0.2,
+def load_data(company, start_date, end_date, prediction_window=60,
+				split_by_date=False, test_start_date='2022-01-01', test_size=0.2,
+				save=True, refresh=True, data_dir='data',
 				feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Loads data from Yahoo Finance source, as well as scaling, normalizing and splitting.
     # Params:
-	# 	company			(str)	: The company you want to train on, examples include AAPL, TESL, etc.
-	#	start_date		(str)	: The start date for the data
-	#	end_date		(str)	: The end date for the data
-	#	save			(bool)	: Whether to save the data locally if it doesn't already exist, default is True
-	#	refresh			(bool)	: Whether to redownload data even if it exists, default is True
-	#	data_dir		(str)	: Directory to store data, default is 'data'
-	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g in 60 days)
+	# 	company				(str)	: The company you want to train on, examples include AAPL, TESL, etc.
+	#	start_date			(str)	: The start date for the data
+	#	end_date			(str)	: The end date for the data
 	#	prediction_window	(int)	: The historical sequence length used to predict, default is 60
-	# 	split_by_date 	(bool)	: Whether we split the dataset into training/testing by date, setting it 
+	# 	split_by_date 		(bool)	: Whether we split the dataset into training/testing by date, setting it 
 	# 		to False will split datasets base on test_size
-	# 	test_size 		(float)	: Ratio for test data, default is 0.2 (20% testing data)
-	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# 	test_size 			(float)	: Ratio for test data, default is 0.2 (20% testing data)
+	#	save				(bool)	: Whether to save the data locally if it doesn't already exist, default is True
+	#	refresh				(bool)	: Whether to redownload data even if it exists, default is True
+	#	data_dir			(str)	: Directory to store data, default is 'data'
+	# 	feature_columns		(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
 
 
 	# Creates data directory if it doesn't exist
@@ -90,6 +90,7 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 
 	# Create dicts to store verions of each value for feature_columns
 	column_x_train, column_y_train = {}, {}
+	column_x_test, column_y_test = {}, {}
 	column_scaler = {}
 	column_actual_prices = {}
 	column_model_inputs = {}
@@ -104,7 +105,7 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 			# train contains all values before test_start_date
 			train = df[column][df.index < test_start_date]
 			# test contains all values after test_start_date
-			test = df[column][df.index >= test_start_date]
+			test = df[column][df.index > test_start_date]
 		# If split_by_date is false, split the dataframe into training and testing based on percentage
 		else:
 			# Convert the test_size percentage to a index
@@ -122,7 +123,7 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 		# First, we reshape a 1D array(n) to 2D array(n,1)
 		# We have to do that because sklearn.preprocessing.fit_transform()
 		# requires a 2D array
-		# Here n == len(scaled_data)
+		# Here n == len(test_scaled_data)
 		# Then, we scale the whole array to the range (0,1)
 		# The parameter -1 allows (np.)reshape to figure out the array size n automatically 
 		# 	values.reshape(-1, 1) 
@@ -132,29 +133,29 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 		# When using a -1, the dimension corresponding to the -1 will be the product of 
 		# 	the dimensions of the original array divided by the product of the dimensions 
 		# 	given to reshape so as to maintain the same number of elements.
-		scaled_data = scaler.fit_transform(train.values.reshape(-1, 1))
+		test_scaled_data = scaler.fit_transform(train.values.reshape(-1, 1))
 		# Save scalar used
 		column_scaler[column] = scaler
 		# Turn the 2D array back to a 1D array
-		scaled_data = scaled_data[:,0]
+		test_scaled_data = test_scaled_data[:,0]
 
 
 		# Arrays for x and y data
 		x_train, y_train = [], []
 
-		# Prepare the data
-		for i in range(prediction_window, len(scaled_data)):
+		# Prepare the training data
+		for i in range(prediction_window, len(test_scaled_data)):
 			# Offset x and y data by prediction_window
-			x_train.append(scaled_data[i-prediction_window:i])
-			y_train.append(scaled_data[i])
+			x_train.append(test_scaled_data[i-prediction_window:i])
+			y_train.append(test_scaled_data[i])
 			
 		# Convert them into an array
 		x_train, y_train = np.array(x_train), np.array(y_train)
-		# Now, x is a 2D array(p,q) where p = len(scaled_data) - prediction_window
+		# Now, x is a 2D array(p,q) where p = len(test_scaled_data) - prediction_window
 		# and q = prediction_window; while y is a 1D array(p)
 
 		# We now reshape x into a 3D array(p, q, 1); Note that x
-		# is an array of p inputs with each input being a 2D array
+		# 	is an array of p inputs with each input being a 2D array
 		x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
 
 		# Store the training data in the dicts under the name of the feature_column
@@ -163,10 +164,30 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 		# Store the actual_prices in the dicts under the name of the feature_column
 		column_actual_prices[column] = test.values
 
-		# Create the inputs which is the amount of prediction_days and all the test data
-		model_inputs = df[column][len(df[column]) - len(test) - prediction_days:].values
+		# Create the inputs which is the amount of prediction_window and all the test data
+		model_inputs = df[column][len(df[column]) - len(test) - prediction_window:].values
+		# Scale model_inputs using the previously used scaler
+		model_inputs = scaler.transform(model_inputs.reshape(-1, 1))
+		# Save model_inputs to dict to be added to the dataset
+		column_model_inputs[column] = model_inputs
+
+		# Create test data arrays
+		x_test, y_test = [], []
+		
+		# Prepare the testing data
+		for i in range(prediction_window, len(model_inputs)):
+			# Offset x and y by prediction window
+			x_test.append(model_inputs[i - prediction_window:i, 0])
+			y_test.append(test_scaled_data[i])
+
+		# Convert test data into numpy arrays
+		x_test, y_test = np.array(x_test), np.array(y_test)
+		# We now reshape x into a 3D array(p, q, 1); Note that x
+		# 	is an array of p inputs with each input being a 2D array
+		x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
+
 		# Store the model_inputs in the dicts under the name of the feature_column
-		column_model_inputs[column] = scaler.transform(model_inputs.reshape(-1, 1))
+		column_x_test[column], column_y_test[column] = x_test, y_test
 
 	# Add the MinMaxScaler instances to the dataset
 	dataset["column_scaler"] = column_scaler
@@ -176,6 +197,8 @@ def load_data(company, start_date, end_date, save=True, refresh=True, data_dir='
 	dataset['column_actual_prices'] = column_actual_prices
 	# Add the model_inputs instances to the dataset
 	dataset['column_model_inputs'] = column_model_inputs
+	# Add the test data instances to the dataset
+	dataset['column_x_test'], dataset['column_y_test'] = column_x_test, column_y_test
 
 	return dataset
 
@@ -264,11 +287,11 @@ def build_model(x_train, y_train):
 
 	return model
 
-def predict(model, model_inputs, scaler, actual_prices, prediction_days = 60):
+def predict(model, x_test, model_inputs, scaler, actual_prices, prediction_days=60):
 	# Uses model and data to make prediction
 	# Params:
 	# 	model					: The model previously generated to actually be tested
-	# 	model_inputs			: The test data to be used for prediction
+	# 	x_test					: The test data to be used for prediction
 	# 	scaler					: The scaler used to process the data so it can be de-normalised
 	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
 	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g in 60 days)
@@ -276,13 +299,6 @@ def predict(model, model_inputs, scaler, actual_prices, prediction_days = 60):
 	#------------------------------------------------------------------------------
 	# Make predictions on test data
 	#------------------------------------------------------------------------------
-	x_test = []
-	for x in range(prediction_days, len(model_inputs)):
-		x_test.append(model_inputs[x - prediction_days:x, 0])
-
-	x_test = np.array(x_test)
-	x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
-	# TO DO: Explain the above 5 lines
 
 	predicted_prices = model.predict(x_test)
 	predicted_prices = scaler.inverse_transform(predicted_prices)
@@ -336,11 +352,11 @@ if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
-	END_DATE = '2022-12-31'
+	END_DATE = '2024-12-31'
 	PRICE_VALUE = 'Close'
 	# Generate the dataset based on the company and the dates
 	dataset = load_data(COMPANY, START_DATE, END_DATE)
 	# Generate the model based on the training data
 	model = build_model(dataset['column_x_train'][PRICE_VALUE], dataset['column_y_train'][PRICE_VALUE])
 	# Run the predictions based on the model and testing data
-	predict(model, dataset['column_model_inputs'][PRICE_VALUE], dataset['column_scaler'][PRICE_VALUE], dataset['column_actual_prices'][PRICE_VALUE])
+	predict(model, dataset['column_x_test'][PRICE_VALUE], dataset['column_model_inputs'][PRICE_VALUE], dataset['column_scaler'][PRICE_VALUE], dataset['column_actual_prices'][PRICE_VALUE])
