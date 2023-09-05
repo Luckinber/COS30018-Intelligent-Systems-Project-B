@@ -1,8 +1,8 @@
 numpy
-matplotlib
+plotly
+nbformat
 pandas
 tensorflow
 scikit-learn
 pandas-datareader
 yfinance
-collections

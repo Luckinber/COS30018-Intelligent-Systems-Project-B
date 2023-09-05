@@ -161,5 +161,6 @@ cython_debug/
 
 refference-p1/
 data/
+model/
 logs/
 results/

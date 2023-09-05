@@ -7,47 +7,45 @@
 # Youtuble link: https://www.youtube.com/watch?v=PuZY9q-aKLw
 # By: NeuralNine
 
-# Need to install the following:
-# pip install numpy
-# pip install matplotlib
-# pip install pandas
-# pip install tensorflow
-# pip install scikit-learn
-# pip install pandas-datareader
-# pip install yfinance
-
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import pandas as pd
 import pandas_datareader as web
 import datetime as dt
 import tensorflow as tf
 import yfinance as yf
+import datetime
 import os
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
 
-def load_data(company, start_date, end_date, prediction_window=60,
-				split_by_date=False, test_start_date='2022-01-01', test_size=0.2,
-				save=True, refresh=True, data_dir='data',
-				feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+def load_data(company, start_date, end_date, prediction_window=60, split=0.2, refresh=True, save=True, data_dir='data', feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Loads data from Yahoo Finance source, as well as scaling, normalizing and splitting.
     # Params:
-	# 	company				(str)	: The company you want to train on, examples include AAPL, TESL, etc.
-	#	start_date			(str)	: The start date for the data
-	#	end_date			(str)	: The end date for the data
-	#	prediction_window	(int)	: The historical sequence length used to predict, default is 60
-	# 	split_by_date 		(bool)	: Whether we split the dataset into training/testing by date, setting it 
-	# 		to False will split datasets base on test_size
-	# 	test_size 			(float)	: Ratio for test data, default is 0.2 (20% testing data)
-	#	save				(bool)	: Whether to save the data locally if it doesn't already exist, default is True
-	#	refresh				(bool)	: Whether to redownload data even if it exists, default is True
-	#	data_dir			(str)	: Directory to store data, default is 'data'
-	# 	feature_columns		(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# 	company				(str)			: The company you want to train on, examples include AAPL, TESL, etc.
+	#	start_date			(str)			: The start date for the data
+	#	end_date			(str)			: The end date for the data
+	#	prediction_window	(int)			: The historical sequence length used to predict, default is 60
+	# 	split 				(str, float)	: Date string or float between 0 and 1 that defines split
+	#	refresh				(bool)			: Whether to redownload data even if it exists, default is True
+	#	save				(bool)			: Whether to save the data locally if it doesn't already exist, default is True
+	#	data_dir			(str)			: Directory to store data, default is 'data'
+	# 	feature_columns		(list)			: The list of features to use to feed into the model, default is everything grabbed from yahoo
 
+	try:
+		split_is_date = bool(datetime.strptime(split, '%Y-%m-%d'))
+	except:
+		split_is_date = False
+
+	try:
+		split_is_float = bool(0 < split < 1)
+	except:
+		split_is_float = False
+	
+	assert split_is_date or split_is_float, f'split must be a float between 0 and 1 or a string (\'yyyy-mm-dd\')'
 
 	# Creates data directory if it doesn't exist
 	if not os.path.isdir(data_dir):
@@ -88,6 +86,24 @@ def load_data(company, start_date, end_date, prediction_window=60,
 	# 1) Use a different price value eg. mid-point of Open & Close
 	#------------------------------------------------------------------------------
 
+	# If split is false, split the dataframe into training and testing data based on the split
+	if split_is_float:
+		# Convert the split percentage to a index
+		train_start = int((1 - split) * len(df))
+		# train contains all values before that index
+		train = df[:train_start]
+		# test contains all values after that index
+		test = df[train_start:]
+	# If split is a date, split the dataframe into training and testing based on that date
+	else:
+		# train contains all values before test_start_date
+		train = df[df.index < split]
+		# test contains all values after test_start_date
+		test = df[df.index > split]
+	# Add the train and test df to the dataset
+	dataset['train_df'] = train
+	dataset['test_df'] = test
+
 	# Create dicts to store verions of each value for feature_columns
 	column_x_train, column_y_train = {}, {}
 	column_x_test, column_y_test = {}, {}
@@ -96,25 +112,6 @@ def load_data(company, start_date, end_date, prediction_window=60,
 	column_model_inputs = {}
 
 	for column in feature_columns:
-		# Create arrays for train and test data
-		train, test = [], []
-		
-		# If split_by_date is true, split the dataframe into training and testing data on a date
-		# THIS IS BROKEN FIX IT
-		if split_by_date:
-			# train contains all values before test_start_date
-			train = df[column][df.index < test_start_date]
-			# test contains all values after test_start_date
-			test = df[column][df.index > test_start_date]
-		# If split_by_date is false, split the dataframe into training and testing based on percentage
-		else:
-			# Convert the test_size percentage to a index
-			train_start = int((1 - test_size) * len(df[column]))
-			# train contains all values before that index
-			train = df[column][:train_start]
-			# test contains all values after that index
-			test = df[column][train_start:]
-
 		# Scaling each feature_column from 0 to 1
 		# Note that, by default, feature_range=(0, 1). Thus, if you want a different 
 		# 	feature_range (min,max) then you'll need to specify it here
@@ -133,7 +130,7 @@ def load_data(company, start_date, end_date, prediction_window=60,
 		# When using a -1, the dimension corresponding to the -1 will be the product of 
 		# 	the dimensions of the original array divided by the product of the dimensions 
 		# 	given to reshape so as to maintain the same number of elements.
-		test_scaled_data = scaler.fit_transform(train.values.reshape(-1, 1))
+		test_scaled_data = scaler.fit_transform(train[column].values.reshape(-1, 1))
 		# Save scalar used
 		column_scaler[column] = scaler
 		# Turn the 2D array back to a 1D array
@@ -161,9 +158,6 @@ def load_data(company, start_date, end_date, prediction_window=60,
 		# Store the training data in the dicts under the name of the feature_column
 		column_x_train[column], column_y_train[column] = x_train, y_train
 
-		# Store the actual_prices in the dicts under the name of the feature_column
-		column_actual_prices[column] = test.values
-
 		# Create the inputs which is the amount of prediction_window and all the test data
 		model_inputs = df[column][len(df[column]) - len(test) - prediction_window:].values
 		# Scale model_inputs using the previously used scaler
@@ -190,11 +184,9 @@ def load_data(company, start_date, end_date, prediction_window=60,
 		column_x_test[column], column_y_test[column] = x_test, y_test
 
 	# Add the MinMaxScaler instances to the dataset
-	dataset["column_scaler"] = column_scaler
+	dataset['column_scaler'] = column_scaler
 	# Add the training data instances to the dataset
 	dataset['column_x_train'], dataset['column_y_train'] = column_x_train, column_y_train
-	# Add the actual_prices instances to the dataset
-	dataset['column_actual_prices'] = column_actual_prices
 	# Add the model_inputs instances to the dataset
 	dataset['column_model_inputs'] = column_model_inputs
 	# Add the test data instances to the dataset
@@ -202,11 +194,28 @@ def load_data(company, start_date, end_date, prediction_window=60,
 
 	return dataset
 
-def build_model(x_train, y_train):
+def build_model(x_train, y_train, refresh=False, save=True, model_dir='model'):
 	# Builds the model
 	# Params:
-	# 	x_train	(list)	:	The x training data
-	# 	y_train	(list)	:	The y training data
+	# 	x_train		(list)	: The x training data
+	# 	y_train		(list)	: The y training data
+	#	refresh 	(bool)	: Whether to retrain the model even if it exists, default is False
+	#	save		(bool)	: Whether to save the model locally if it doesn't already exist, default is True
+	#	model_dir	(str)	: Directory to store model, default is 'model'
+	
+	# Creates model directory if it doesn't exist
+	if not os.path.isdir(model_dir):
+		os.mkdir(model_dir)
+		
+	# Shorthand for provided model path and generated filename
+	model_file_path = os.path.join(model_dir, f'model.keras')
+
+	# Checks if data file with same data exists
+	if os.path.exists(model_file_path) and not refresh:
+		# If file exists and data shouldn't be updated, import as pandas data frame object
+		# 'index_col=0' makes the date the index rather than making a new coloumn
+		model = load_model(model_file_path)
+		return model
 	
 	#------------------------------------------------------------------------------
 	# Build the Model
@@ -285,40 +294,75 @@ def build_model(x_train, y_train):
 	# your pre-trained model and run it on the new input for which the prediction
 	# need to be made.
 
+	if save:
+		model.save(model_file_path)
+
 	return model
 
-def predict(model, x_test, model_inputs, scaler, actual_prices, prediction_days=60):
+def print_candlestick_plot(model, scaler, x_test, test_data, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	model					: The model previously generated to actually be tested
-	# 	x_test					: The test data to be used for prediction
 	# 	scaler					: The scaler used to process the data so it can be de-normalised
+	# 	x_test					: The test data to be used for prediction
 	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
-	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g in 60 days)
+	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
 
-	#------------------------------------------------------------------------------
-	# Make predictions on test data
-	#------------------------------------------------------------------------------
+	prediction_df = pd.DataFrame(index=test_data.index)
 
-	predicted_prices = model.predict(x_test)
-	predicted_prices = scaler.inverse_transform(predicted_prices)
-	# Clearly, as we transform our data into the normalized range (0,1),
-	# we now need to reverse this transformation 
+	for column in feature_columns:
+		#------------------------------------------------------------------------------
+		# Make predictions on test data
+		#------------------------------------------------------------------------------
+
+		predicted_prices = model.predict(x_test[column])
+		# Clearly, as we transform our data into the normalized range (0,1),
+		# we now need to reverse this transformation
+		predicted_prices = scaler[column].inverse_transform(predicted_prices)
+		predicted_prices = np.array(predicted_prices)
+		prediction_df[column] = predicted_prices
+
 	#------------------------------------------------------------------------------
 	# Plot the test predictions
 	## To do:
-	# 1) Candle stick charts
-	# 2) Chart showing High & Lows of the day
-	# 3) Show chart of next few days (predicted)
+	# 1) Chart showing High & Lows of the day
+	# 2) Show chart of next few days (predicted)
 	#------------------------------------------------------------------------------
 
-	plt.plot(actual_prices, color="black", label=f"Actual {COMPANY} Price")
-	plt.plot(predicted_prices, color="green", label=f"Predicted {COMPANY} Price")
-	plt.title(f"{COMPANY} Share Price")
-	plt.xlabel("Time")
-	plt.ylabel(f"{COMPANY} Share Price")
-	plt.legend()
-	plt.show()
+	actual_prices = go.Candlestick(
+		x=test_data.index,
+		open=test_data['Open'],
+		high=test_data['High'],
+		low=test_data['Low'],
+		close=test_data['Close'],
+		showlegend=False
+	)
+	
+	close_predicted_prices = go.Scatter(
+		x=test_data.index,
+		y=prediction_df['Close'],
+		name="Close Prediction",
+		line_color='#0078FF'
+	)
+
+	fig = go.Figure(data=[actual_prices, close_predicted_prices])
+
+	fig.update_layout(
+		title=f'{COMPANY} Share Prices',
+		yaxis_title='Price ($)'
+	)
+
+	fig.show()
+
+	return
+
+def predict(model, scaler, model_inputs, prediction_days=60):
+	# Uses model and data to make prediction
+	# Params:
+	# 	model					: The model previously generated to actually be tested
+	# 	scaler					: The scaler used to process the data so it can be de-normalised
+	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
+	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g in 60 days)
 
 	#------------------------------------------------------------------------------
 	# Predict next day
@@ -331,8 +375,6 @@ def predict(model, x_test, model_inputs, scaler, actual_prices, prediction_days=
 
 	prediction = model.predict(real_data)
 	prediction = scaler.inverse_transform(prediction)
-	print(f"Prediction: {prediction}")
-
 	# A few concluding remarks here:
 	# 1. The predictor is quite bad, especially if you look at the next day 
 	# prediction, it missed the actual price by about 10%-13%
@@ -348,15 +390,24 @@ def predict(model, x_test, model_inputs, scaler, actual_prices, prediction_days=
 	# https://github.com/jason887/Using-Deep-Learning-Neural-Networks-and-Candlestick-Chart-Representation-to-Predict-Stock-Market
 	# Can you combine these different techniques for a better prediction??
 
+	return prediction
+
 if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
-	END_DATE = '2024-12-31'
+	END_DATE = '2023-12-31'
 	PRICE_VALUE = 'Close'
+
 	# Generate the dataset based on the company and the dates
-	dataset = load_data(COMPANY, START_DATE, END_DATE)
+	dataset = load_data(COMPANY, START_DATE, END_DATE, split=0.1)
+
 	# Generate the model based on the training data
 	model = build_model(dataset['column_x_train'][PRICE_VALUE], dataset['column_y_train'][PRICE_VALUE])
+
+	# Show graph of prices
+	print_candlestick_plot(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'], [PRICE_VALUE])
+	
 	# Run the predictions based on the model and testing data
-	predict(model, dataset['column_x_test'][PRICE_VALUE], dataset['column_model_inputs'][PRICE_VALUE], dataset['column_scaler'][PRICE_VALUE], dataset['column_actual_prices'][PRICE_VALUE])
+	prediction = predict(model, dataset['column_scaler'][PRICE_VALUE], dataset['column_model_inputs'][PRICE_VALUE])
+	print(f'Prediction: {prediction}')
