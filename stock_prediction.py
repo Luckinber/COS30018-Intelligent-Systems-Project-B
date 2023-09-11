@@ -209,7 +209,7 @@ def build_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
 	prediction_window = len(x_train[0])
 
 	# Shorthand for provided model path and generated filename
-	model_file_path = os.path.join(model_dir, f'model.keras_{prediction_window}-window')
+	model_file_path = os.path.join(model_dir, f'model_{prediction_window}-window.keras')
 
 	# Checks if data file with same data exists
 	if os.path.exists(model_file_path) and not refresh:
