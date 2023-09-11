@@ -52,7 +52,7 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 		os.mkdir(data_dir)
 		
 	# Shorthand for provided data path and generated filename
-	df_file_path = os.path.join(data_dir, f'{company}_{start_date}-{end_date}.csv')
+	df_file_path = os.path.join(data_dir, f'{company}_{start_date}-{end_date}_{prediction_window}-window.csv')
 
 	# Checks if data file with same data exists
 	if os.path.exists(df_file_path) and not refresh:
@@ -205,9 +205,11 @@ def build_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
 	# Creates model directory if it doesn't exist
 	if not os.path.isdir(model_dir):
 		os.mkdir(model_dir)
-		
+	
+	prediction_window = len(x_train[0])
+
 	# Shorthand for provided model path and generated filename
-	model_file_path = os.path.join(model_dir, f'model.keras')
+	model_file_path = os.path.join(model_dir, f'model.keras_{prediction_window}-window')
 
 	# Checks if data file with same data exists
 	if os.path.exists(model_file_path) and not refresh:
