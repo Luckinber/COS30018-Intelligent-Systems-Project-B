@@ -8,7 +8,7 @@
 # By: NeuralNine
 
 import numpy as np
-import plotly.graph_objects as go
+import plotly.graph_objects as graphs
 import pandas as pd
 import pandas_datareader as web
 import datetime as dt
@@ -22,7 +22,7 @@ from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
 
-def load_data(company, start_date, end_date, prediction_window=60, split=0.2, refresh=True, save=True, data_dir='data', feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+def load_data(company, start_date, end_date, prediction_window=60, split=0.2, refresh=True, save=True, data_dir='data', feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
 	# Loads data from Yahoo Finance source, as well as scaling, normalizing and splitting.
     # Params:
 	# 	company				(str)			: The company you want to train on, examples include AAPL, TESL, etc.
@@ -73,7 +73,7 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 	# Create dataset dictionary to store outputs
 	dataset = {}
     # Store the original dataframe itself
-	dataset['df'] = df.copy()
+	dataset['stock_df'] = df.copy()
 	
 	# Drop NaNs
 	df.dropna(inplace=True)
@@ -105,10 +105,9 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 	dataset['test_df'] = test
 
 	# Create dicts to store verions of each value for feature_columns
+	column_scaler = {}
 	column_x_train, column_y_train = {}, {}
 	column_x_test, column_y_test = {}, {}
-	column_scaler = {}
-	column_actual_prices = {}
 	column_model_inputs = {}
 
 	for column in feature_columns:
@@ -187,10 +186,10 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 	dataset['column_scaler'] = column_scaler
 	# Add the training data instances to the dataset
 	dataset['column_x_train'], dataset['column_y_train'] = column_x_train, column_y_train
-	# Add the model_inputs instances to the dataset
-	dataset['column_model_inputs'] = column_model_inputs
 	# Add the test data instances to the dataset
 	dataset['column_x_test'], dataset['column_y_test'] = column_x_test, column_y_test
+	# Add the model_inputs instances to the dataset
+	dataset['column_model_inputs'] = column_model_inputs
 
 	return dataset
 
@@ -299,22 +298,22 @@ def build_model(x_train, y_train, refresh=False, save=True, model_dir='model'):
 
 	return model
 
-def print_candlestick_plot(model, scaler, x_test, test_data, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+def predict_test(model, scaler, x_test, test_index, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	model					: The model previously generated to actually be tested
 	# 	scaler					: The scaler used to process the data so it can be de-normalised
 	# 	x_test					: The test data to be used for prediction
-	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
+	#	test_index		(list)	: Datetime index of the test data to be added to prediction_df for graphs
 	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
 
-	prediction_df = pd.DataFrame(index=test_data.index)
+	prediction_df = pd.DataFrame(index=test_index)
+
+	#------------------------------------------------------------------------------
+	# Make predictions on test data
+	#------------------------------------------------------------------------------
 
 	for column in feature_columns:
-		#------------------------------------------------------------------------------
-		# Make predictions on test data
-		#------------------------------------------------------------------------------
-
 		predicted_prices = model.predict(x_test[column])
 		# Clearly, as we transform our data into the normalized range (0,1),
 		# we now need to reverse this transformation
@@ -322,36 +321,128 @@ def print_candlestick_plot(model, scaler, x_test, test_data, feature_columns=['O
 		predicted_prices = np.array(predicted_prices)
 		prediction_df[column] = predicted_prices
 
+	return prediction_df
+
+def print_candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open', 'Close']):
+	# Uses model and data to make prediction
+	# Params:
+	# 	test_df			(df)	: The test data downloaded from yahoo
+	# 	predicted_df	(df)	: The predictions based on the test data
+	# 	days			(int)	: The amount of days to show in a candlestick, default is 1
+	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+
 	#------------------------------------------------------------------------------
 	# Plot the test predictions
 	## To do:
-	# 1) Chart showing High & Lows of the day
-	# 2) Show chart of next few days (predicted)
+	# 1) Show chart of next few days (predicted)
 	#------------------------------------------------------------------------------
 
-	actual_prices = go.Candlestick(
-		x=test_data.index,
-		open=test_data['Open'],
-		high=test_data['High'],
-		low=test_data['Low'],
-		close=test_data['Close'],
+	# Ensure that days is valid
+	assert days >= 0, 'days must be bigger than or equal to 1'
+
+	# Tell how the pd resample should treat the different vales
+	aggregation = {
+		'Open':'first',
+		'High':'max',
+		'Low':'min',
+		'Close':'last',
+		'Volume':'sum'
+	}
+	# Resample both the test data and the prediction data based on 'days'
+	resampled_test_df = test_df.resample(f'{days}d').agg(aggregation)
+	resampled_predicted_df = predicted_df.resample(f'{days}d').agg(aggregation)
+	
+	# Derrive the dates of of the graph from the dataset
+	date_range = f'{test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}'
+
+	# Create candlestick grpah of test data
+	test_data_graph = graphs.Candlestick(
+		x=resampled_test_df.index,
+		open=resampled_test_df['Open'],
+		high=resampled_test_df['High'],
+		low=resampled_test_df['Low'],
+		close=resampled_test_df['Close'],
 		showlegend=False
 	)
-	
-	close_predicted_prices = go.Scatter(
-		x=test_data.index,
-		y=prediction_df['Close'],
-		name="Close Prediction",
-		line_color='#0078FF'
-	)
+	# Create scatter graphs of predicted data
+	predicted_data_graphs = []
+	for column in feature_columns:
+		graph = graphs.Scatter(
+			x=resampled_predicted_df.index,
+			y=resampled_predicted_df[column],
+			name=f'Predicted {column}'
+		)
+		predicted_data_graphs.append(graph)
 
-	fig = go.Figure(data=[actual_prices, close_predicted_prices])
-
+	# Put graphs together in figure
+	fig = graphs.Figure(data=([test_data_graph] + predicted_data_graphs))
+	# Update figure titles
 	fig.update_layout(
-		title=f'{COMPANY} Share Prices',
+		title=f'{COMPANY} Share Prices {date_range}',
 		yaxis_title='Price ($)'
 	)
+	# Display figure
+	fig.show()
 
+	return
+
+def print_boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'Close']):
+	# Uses model and data to make prediction
+	# Params:
+	# 	test_df			(df)	: The test data downloaded from yahoo
+	# 	predicted_df	(df)	: The predictions based on the test data
+	# 	days			(int)	: The amount of days to show in a candlestick, default is 1
+	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+
+	#------------------------------------------------------------------------------
+	# Plot the test predictions
+	## To do:
+	# 1) Show chart of next few days (predicted)
+	#------------------------------------------------------------------------------
+
+	# Ensure that days is valid
+	assert days >= 0, 'days must be bigger than or equal to 1'
+
+	# Tell how the pd resample should treat the different vales
+	aggregation = {
+		'Open':'first',
+		'High':'max',
+		'Low':'min',
+		'Close':'last',
+		'Volume':'sum'
+	}
+	# Resample both the test data and the prediction data based on 'days'
+	resampled_test_df = test_df.resample(f'{days}d').agg(aggregation)
+	resampled_predicted_df = predicted_df.resample(f'{days}d').agg(aggregation)
+	
+	# Derrive the dates of of the graph from the dataset
+	date_range = f'{test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}'
+
+	import plotly.express as px
+	# Create candlestick grpah of test data
+	test_data_graph = graphs.Box(
+		x=resampled_test_df.index,
+		y=resampled_test_df['Open'],
+		showlegend=False
+	)
+	# Create scatter graphs of predicted data
+	predicted_data_graphs = []
+	for column in feature_columns:
+		graph = graphs.Scatter(
+			x=resampled_predicted_df.index,
+			y=resampled_predicted_df[column],
+			name=f'Predicted {column}'
+		)
+		predicted_data_graphs.append(graph)
+
+	# Put graphs together in figure
+	fig = graphs.Figure(data=([test_data_graph] + predicted_data_graphs))
+	# Update figure titles
+	fig.update_layout(
+		title=f'{COMPANY} Share Prices {date_range}',
+		yaxis_title='Price ($)'
+	)
+	# Display figure
 	fig.show()
 
 	return
@@ -405,8 +496,12 @@ if __name__ == '__main__':
 	# Generate the model based on the training data
 	model = build_model(dataset['column_x_train'][PRICE_VALUE], dataset['column_y_train'][PRICE_VALUE])
 
-	# Show graph of prices
-	print_candlestick_plot(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'], [PRICE_VALUE])
+	# Make df of predictions to compare against test data
+	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
+
+	# Show candlestick graph of prices
+	print_candlestick_plot(dataset['test_df'], prediction_df, 7, [PRICE_VALUE])
+	print_boxplot(dataset['test_df'], prediction_df, 7, [PRICE_VALUE])
 	
 	# Run the predictions based on the model and testing data
 	prediction = predict(model, dataset['column_scaler'][PRICE_VALUE], dataset['column_model_inputs'][PRICE_VALUE])
