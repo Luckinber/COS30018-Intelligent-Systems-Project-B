@@ -57,8 +57,8 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 	# Checks if data file with same data exists
 	if os.path.exists(df_file_path) and not refresh:
 		# If file exists and data shouldn't be updated, import as pandas data frame object
-		# 'index_col=0' makes the date the index rather than making a new coloumn
-		df = pd.read_csv(df_file_path, index_col=0)
+		# index_col='Date' makes the date the index rather than making a new coloumn
+		df = pd.read_csv(df_file_path, parse_dates=True, index_col='Date')
 	else:
 		# If file doesn't exist, download data from yahoo
 		df = yf.download(company, start=start_date, end=end_date, progress=False)
@@ -193,7 +193,7 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 
 	return dataset
 
-def build_model(x_train, y_train, refresh=False, save=True, model_dir='model'):
+def build_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
 	# Builds the model
 	# Params:
 	# 	x_train		(list)	: The x training data
@@ -323,7 +323,7 @@ def predict_test(model, scaler, x_test, test_index, feature_columns=['Open', 'Hi
 
 	return prediction_df
 
-def print_candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open', 'Close']):
+def candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	test_df			(df)	: The test data downloaded from yahoo
@@ -381,12 +381,10 @@ def print_candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open
 		title=f'{COMPANY} Share Prices {date_range}',
 		yaxis_title='Price ($)'
 	)
-	# Display figure
-	fig.show()
 
-	return
+	return fig
 
-def print_boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'Close']):
+def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	test_df			(df)	: The test data downloaded from yahoo
@@ -442,10 +440,8 @@ def print_boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'Close
 		title=f'{COMPANY} Share Prices {date_range}',
 		yaxis_title='Price ($)'
 	)
-	# Display figure
-	fig.show()
 
-	return
+	return fig
 
 def predict(model, scaler, model_inputs, prediction_days=60):
 	# Uses model and data to make prediction
@@ -488,21 +484,23 @@ if __name__ == '__main__':
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
 	END_DATE = '2023-12-31'
-	PRICE_VALUE = 'Close'
+	CHOSEN_FEATURE = 'Close'
+	REFRESH = False
 
 	# Generate the dataset based on the company and the dates
-	dataset = load_data(COMPANY, START_DATE, END_DATE, split=0.1)
+	dataset = load_data(COMPANY, START_DATE, END_DATE, 120, 0.1, REFRESH)
 
 	# Generate the model based on the training data
-	model = build_model(dataset['column_x_train'][PRICE_VALUE], dataset['column_y_train'][PRICE_VALUE])
+	model = build_model(dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], REFRESH)
 
 	# Make df of predictions to compare against test data
 	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
 
 	# Show candlestick graph of prices
-	print_candlestick_plot(dataset['test_df'], prediction_df, 7, [PRICE_VALUE])
-	print_boxplot(dataset['test_df'], prediction_df, 7, [PRICE_VALUE])
+	candlestick_plot(dataset['test_df'], prediction_df, 7, [CHOSEN_FEATURE]).show()
+	# Show boxplot of prices
+	boxplot(dataset['test_df'], prediction_df, 7, [CHOSEN_FEATURE]).show()
 	
 	# Run the predictions based on the model and testing data
-	prediction = predict(model, dataset['column_scaler'][PRICE_VALUE], dataset['column_model_inputs'][PRICE_VALUE])
+	prediction = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE])
 	print(f'Prediction: {prediction}')
