@@ -355,7 +355,7 @@ def candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open', 'Hi
 	# Derrive the dates of of the graph from the dataset
 	date_range = f'{test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}'
 
-	# Create candlestick grpah of test data
+	# Create candlestick graph of test data
 	test_data_graph = graphs.Candlestick(
 		x=resampled_test_df.index,
 		open=resampled_test_df['Open'],
@@ -416,8 +416,7 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	# Derrive the dates of of the graph from the dataset
 	date_range = f'{test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}'
 
-	import plotly.express as px
-	# Create candlestick grpah of test data
+	# Create box graph of test data
 	test_data_graph = graphs.Box(
 		x=resampled_test_df.index,
 		y=resampled_test_df['Open'],
