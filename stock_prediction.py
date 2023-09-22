@@ -366,7 +366,7 @@ def candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open', 'Hi
 		close=resampled_test_df['Close'],
 		showlegend=False
 	)
-	# Create scatter graphs of predicted data
+	# Create scatter graphs of predicted feature
 	predicted_data_graphs = []
 	for column in feature_columns:
 		graph = graphs.Scatter(
@@ -386,7 +386,7 @@ def candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open', 'Hi
 
 	return fig
 
-def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
+def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	test_df			(df)	: The test data downloaded from yahoo
@@ -418,13 +418,20 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	# Derrive the dates of of the graph from the dataset
 	date_range = f'{test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}'
 
-	# Create box graph of test data
-	test_data_graph = graphs.Box(
-		x=resampled_test_df.index,
-		y=resampled_test_df['Open'],
-		showlegend=False
-	)
-	# Create scatter graphs of predicted data
+	# Create a box plot for each day
+	boxes = []
+	for date in resampled_test_df.index:
+		# Select the data for this day
+		day_data = resampled_test_df[resampled_test_df.index == date][['Open', 'High', 'Low', 'Close']]
+		# Create a box plot for this day's data
+		box = graphs.Box(
+			y=day_data.values[0],
+			name=str(date),
+			showlegend=False
+		)
+		boxes.append(box)
+
+	# Create scatter graphs of predicted feature
 	predicted_data_graphs = []
 	for column in feature_columns:
 		graph = graphs.Scatter(
@@ -435,7 +442,8 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 		predicted_data_graphs.append(graph)
 
 	# Put graphs together in figure
-	fig = graphs.Figure(data=([test_data_graph] + predicted_data_graphs))
+	fig = graphs.Figure(data=(boxes + predicted_data_graphs))
+
 	# Update figure titles
 	fig.update_layout(
 		title=f'{COMPANY} Share Prices {date_range}',
@@ -498,9 +506,9 @@ if __name__ == '__main__':
 	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
 
 	# Show candlestick graph of prices
-	candlestick_plot(dataset['test_df'], prediction_df, 7, [CHOSEN_FEATURE]).show()
+	candlestick_plot(dataset['test_df'], prediction_df, 14, [CHOSEN_FEATURE]).show()
 	# Show boxplot of prices
-	boxplot(dataset['test_df'], prediction_df, 7, [CHOSEN_FEATURE]).show()
+	boxplot(dataset['test_df'], prediction_df, 14, [CHOSEN_FEATURE]).show()
 	
 	# Run the predictions based on the model and testing data
 	prediction = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE])
