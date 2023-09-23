@@ -193,7 +193,74 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 
 	return dataset
 
-def build_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
+def create_model(sequence_length, n_features=1, cell=LSTM, layers={'Name': ['First', 'Second', 'Last'], 'Size': [50, 50, 50]}, dropout=0.3, optimizer='adam', loss='mean_squared_error'):
+	# #------------------------------------------------------------------------------
+	# # Build the Model
+	# #------------------------------------------------------------------------------
+
+	# model = Sequential() # Basic neural network
+	# # See: https://www.tensorflow.org/api_docs/python/tf/keras/Sequential for some useful examples
+
+	# model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1)))
+	# # This is our first hidden layer which also spcifies an input layer. 
+	# # That's why we specify the input shape for this layer; 
+	# # i.e. the format of each training example
+	# # The above would be equivalent to the following two lines of code:
+	# # model.add(InputLayer(input_shape=(x_train.shape[1], 1)))
+	# # model.add(LSTM(units=50, return_sequences=True))
+	# # For som eadvances explanation of return_sequences:
+	# # https://machinelearningmastery.com/return-sequences-and-return-states-for-lstms-in-keras/
+	# # https://www.dlology.com/blog/how-to-use-return_state-or-return_sequences-in-keras/
+	# # As explained there, for a stacked LSTM, you must set return_sequences=True 
+	# # when stacking LSTM layers so that the next LSTM layer has a 
+	# # three-dimensional sequence input. 
+
+	# # Finally, units specifies the number of nodes in this layer.
+	# # This is one of the parameters you want to play with to see what number
+	# # of units will give you better prediction quality (for your problem)
+
+	# model.add(Dropout(0.2))
+	# # The Dropout layer randomly sets input units to 0 with a frequency of 
+	# # rate (= 0.2 above) at each step during training time, which helps 
+	# # prevent overfitting (one of the major problems of ML). 
+
+	# model.add(LSTM(units=50, return_sequences=True))
+	# # More on Stacked LSTM:
+	# # https://machinelearningmastery.com/stacked-long-short-term-memory-networks/
+
+	# model.add(Dropout(0.2))
+	# model.add(LSTM(units=50))
+	# model.add(Dropout(0.2))
+
+	# model.add(Dense(units=1)) 
+	# # Prediction of the next closing value of the stock price
+
+	# # We compile the model by specify the parameters for the model
+	# # See lecture Week 6 (COS30018)
+	# model.compile(optimizer='adam', loss='mean_squared_error')
+	# # The optimizer and loss are two important parameters when building an 
+	# # ANN model. Choosing a different optimizer/loss can affect the prediction
+	# # quality significantly. You should try other settings to learn; e.g.
+		
+	# # optimizer='rmsprop'/'sgd'/'adadelta'/...
+	# # loss='mean_absolute_error'/'huber_loss'/'cosine_similarity'/...
+	
+	model = Sequential()
+	for i in range(len(layers)):
+		if i == 0:
+			# First layer
+			model.add(cell(layers['Size'][i], return_sequences=True, name=f'layer_{layers["Name"][i]}_{cell.__name__}', input_shape=(sequence_length, n_features)))
+		else:
+			# Middle layers
+			model.add(cell(layers['Size'][i], return_sequences=True, name=f'layer_{layers["Name"][i]}_{cell.__name__}'))
+		# Add dropout after each layer
+		model.add(Dropout(dropout))
+	model.add(Dense(1, activation="linear"))
+	model.compile(optimizer=optimizer, loss=loss)
+	
+	return model
+
+def train_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
 	# Builds the model
 	# Params:
 	# 	x_train		(list)	: The x training data
@@ -217,59 +284,8 @@ def build_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
 		# 'index_col=0' makes the date the index rather than making a new coloumn
 		model = load_model(model_file_path)
 		return model
-	
-	#------------------------------------------------------------------------------
-	# Build the Model
-	## TO DO:
-	# 1) Change the model to increase accuracy?
-	#------------------------------------------------------------------------------
-	model = Sequential() # Basic neural network
-	# See: https://www.tensorflow.org/api_docs/python/tf/keras/Sequential
-	# for some useful examples
 
-	model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1)))
-	# This is our first hidden layer which also spcifies an input layer. 
-	# That's why we specify the input shape for this layer; 
-	# i.e. the format of each training example
-	# The above would be equivalent to the following two lines of code:
-	# model.add(InputLayer(input_shape=(x_train.shape[1], 1)))
-	# model.add(LSTM(units=50, return_sequences=True))
-	# For som eadvances explanation of return_sequences:
-	# https://machinelearningmastery.com/return-sequences-and-return-states-for-lstms-in-keras/
-	# https://www.dlology.com/blog/how-to-use-return_state-or-return_sequences-in-keras/
-	# As explained there, for a stacked LSTM, you must set return_sequences=True 
-	# when stacking LSTM layers so that the next LSTM layer has a 
-	# three-dimensional sequence input. 
-
-	# Finally, units specifies the number of nodes in this layer.
-	# This is one of the parameters you want to play with to see what number
-	# of units will give you better prediction quality (for your problem)
-
-	model.add(Dropout(0.2))
-	# The Dropout layer randomly sets input units to 0 with a frequency of 
-	# rate (= 0.2 above) at each step during training time, which helps 
-	# prevent overfitting (one of the major problems of ML). 
-
-	model.add(LSTM(units=50, return_sequences=True))
-	# More on Stacked LSTM:
-	# https://machinelearningmastery.com/stacked-long-short-term-memory-networks/
-
-	model.add(Dropout(0.2))
-	model.add(LSTM(units=50))
-	model.add(Dropout(0.2))
-
-	model.add(Dense(units=1)) 
-	# Prediction of the next closing value of the stock price
-
-	# We compile the model by specify the parameters for the model
-	# See lecture Week 6 (COS30018)
-	model.compile(optimizer='adam', loss='mean_squared_error')
-	# The optimizer and loss are two important parameters when building an 
-	# ANN model. Choosing a different optimizer/loss can affect the prediction
-	# quality significantly. You should try other settings to learn; e.g.
-		
-	# optimizer='rmsprop'/'sgd'/'adadelta'/...
-	# loss='mean_absolute_error'/'huber_loss'/'cosine_similarity'/...
+	model = create_model(x_train.shape[1])
 
 	# Now we are going to train this model with our training data 
 	# (x_train, y_train)
@@ -500,7 +516,7 @@ if __name__ == '__main__':
 	dataset = load_data(COMPANY, START_DATE, END_DATE, 120, 0.1, REFRESH)
 
 	# Generate the model based on the training data
-	model = build_model(dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], REFRESH)
+	model = train_model(dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], REFRESH)
 
 	# Make df of predictions to compare against test data
 	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
