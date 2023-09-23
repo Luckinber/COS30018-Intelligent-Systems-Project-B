@@ -325,13 +325,13 @@ def predict_test(model, scaler, x_test, test_index, feature_columns=['Open', 'Hi
 
 	return prediction_df
 
-def candlestick_plot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
+def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	test_df			(df)	: The test data downloaded from yahoo
 	# 	predicted_df	(df)	: The predictions based on the test data
 	# 	days			(int)	: The amount of days to show in a candlestick, default is 1
-	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
 
 	#------------------------------------------------------------------------------
 	# Plot the test predictions
@@ -392,7 +392,7 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	# 	test_df			(df)	: The test data downloaded from yahoo
 	# 	predicted_df	(df)	: The predictions based on the test data
 	# 	days			(int)	: The amount of days to show in a candlestick, default is 1
-	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
 
 	#------------------------------------------------------------------------------
 	# Plot the test predictions
@@ -458,12 +458,11 @@ def predict(model, scaler, model_inputs, prediction_days=60):
 	# 	model					: The model previously generated to actually be tested
 	# 	scaler					: The scaler used to process the data so it can be de-normalised
 	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
-	# 	prediction_days	(int)	: How far ahead the final prediction should be, default is 1 (e.g in 60 days)
+	# 	prediction_days	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
 
 	#------------------------------------------------------------------------------
 	# Predict next day
 	#------------------------------------------------------------------------------
-
 
 	real_data = [model_inputs[len(model_inputs) - prediction_days:, 0]]
 	real_data = np.array(real_data)
@@ -495,6 +494,7 @@ if __name__ == '__main__':
 	END_DATE = '2023-12-31'
 	CHOSEN_FEATURE = 'Close'
 	REFRESH = False
+	GRAPH_DAYS = 7
 
 	# Generate the dataset based on the company and the dates
 	dataset = load_data(COMPANY, START_DATE, END_DATE, 120, 0.1, REFRESH)
@@ -506,9 +506,9 @@ if __name__ == '__main__':
 	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
 
 	# Show candlestick graph of prices
-	candlestick_plot(dataset['test_df'], prediction_df, 14, [CHOSEN_FEATURE]).show()
+	candlestick(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
 	# Show boxplot of prices
-	boxplot(dataset['test_df'], prediction_df, 14, [CHOSEN_FEATURE]).show()
+	boxplot(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
 	
 	# Run the predictions based on the model and testing data
 	prediction = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE])
