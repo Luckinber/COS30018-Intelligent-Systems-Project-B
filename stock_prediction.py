@@ -20,7 +20,7 @@ import os
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
+from tensorflow.keras.layers import Dense, Dropout, InputLayer, LSTM, SimpleRNN, GRU
 
 def load_data(company, start_date, end_date, prediction_window=60, split=0.2, refresh=True, save=True, data_dir='data', feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
 	# Loads data from Yahoo Finance source, as well as scaling, normalizing and splitting.
@@ -34,6 +34,8 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 	#	save				(bool)			: Whether to save the data locally if it doesn't already exist, default is True
 	#	data_dir			(str)			: Directory to store data, default is 'data'
 	# 	feature_columns		(list)			: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# Returns:
+	# 	dataset				(dict)			: The dataset dictionary containing all the data
 
 	try:
 		split_is_date = bool(datetime.strptime(split, '%Y-%m-%d'))
@@ -193,90 +195,75 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 
 	return dataset
 
-def create_model(sequence_length, n_features=1, cell=LSTM, layers={'Name': ['First', 'Second', 'Last'], 'Size': [50, 50, 50]}, dropout=0.3, optimizer='adam', loss='mean_squared_error'):
-	# #------------------------------------------------------------------------------
-	# # Build the Model
-	# #------------------------------------------------------------------------------
+def create_model(sequence_length, n_features=1, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, optimizer='adam', loss='mean_squared_error'):
+	# Builds the model
+	# Params:
+	# 	sequence_length	(int)	: The historical sequence length used to predict
+	# 	n_features		(int)	: The number of features used to predict, default is 1
+	# 	cell			(func)	: The type of cell to use in the model, default is LSTM
+	# 	layer_size		(list)	: The size of each layer in the model, default is [50, 50, 50]
+	# 	dropout			(float)	: The dropout rate to use in the model, default is 0.2
+	# 	optimizer		(str)	: The optimizer to use in the model, default is 'adam'
+	# 	loss			(str)	: The loss function to use in the model, default is 'mean_squared_error'
+	# Returns:
+	# 	model			(model)	: The model to be trained
 
-	# model = Sequential() # Basic neural network
-	# # See: https://www.tensorflow.org/api_docs/python/tf/keras/Sequential for some useful examples
-
-	# model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1)))
-	# # This is our first hidden layer which also spcifies an input layer. 
-	# # That's why we specify the input shape for this layer; 
-	# # i.e. the format of each training example
-	# # The above would be equivalent to the following two lines of code:
-	# # model.add(InputLayer(input_shape=(x_train.shape[1], 1)))
-	# # model.add(LSTM(units=50, return_sequences=True))
-	# # For som eadvances explanation of return_sequences:
-	# # https://machinelearningmastery.com/return-sequences-and-return-states-for-lstms-in-keras/
-	# # https://www.dlology.com/blog/how-to-use-return_state-or-return_sequences-in-keras/
-	# # As explained there, for a stacked LSTM, you must set return_sequences=True 
-	# # when stacking LSTM layers so that the next LSTM layer has a 
-	# # three-dimensional sequence input. 
-
-	# # Finally, units specifies the number of nodes in this layer.
-	# # This is one of the parameters you want to play with to see what number
-	# # of units will give you better prediction quality (for your problem)
-
-	# model.add(Dropout(0.2))
-	# # The Dropout layer randomly sets input units to 0 with a frequency of 
-	# # rate (= 0.2 above) at each step during training time, which helps 
-	# # prevent overfitting (one of the major problems of ML). 
-
-	# model.add(LSTM(units=50, return_sequences=True))
-	# # More on Stacked LSTM:
-	# # https://machinelearningmastery.com/stacked-long-short-term-memory-networks/
-
-	# model.add(Dropout(0.2))
-	# model.add(LSTM(units=50))
-	# model.add(Dropout(0.2))
-
-	# model.add(Dense(units=1)) 
-	# # Prediction of the next closing value of the stock price
-
-	# # We compile the model by specify the parameters for the model
-	# # See lecture Week 6 (COS30018)
-	# model.compile(optimizer='adam', loss='mean_squared_error')
-	# # The optimizer and loss are two important parameters when building an 
-	# # ANN model. Choosing a different optimizer/loss can affect the prediction
-	# # quality significantly. You should try other settings to learn; e.g.
-		
-	# # optimizer='rmsprop'/'sgd'/'adadelta'/...
-	# # loss='mean_absolute_error'/'huber_loss'/'cosine_similarity'/...
-	
+	# Basic neural network
 	model = Sequential()
-	for i in range(len(layers)):
+	# Add layers to model based on the length of layer_size
+	for i in range(len(layer_size)):
+		# Create cell based on cell type
 		if i == 0:
-			# First layer
-			model.add(cell(layers['Size'][i], return_sequences=True, name=f'layer_{layers["Name"][i]}_{cell.__name__}', input_shape=(sequence_length, n_features)))
+			# Add input layer that needs input shape defined
+			model.add(InputLayer(input_shape=(sequence_length, n_features)))
+			model.add(cell(units=layer_size[i], return_sequences=True))
+			# For som eadvances explanation of return_sequences:
+			# https://machinelearningmastery.com/return-sequences-and-return-states-for-lstms-in-keras/
+			# https://www.dlology.com/blog/how-to-use-return_state-or-return_sequences-in-keras/
+			# As explained there, for a stacked LSTM, you must set return_sequences=True 
+			# when stacking LSTM layers so that the next LSTM layer has a 
+			# three-dimensional sequence input. 
+		elif i == len(layer_size) - 1:
+			# Add output layer that doesn't need a return sequence
+			model.add(cell(units=layer_size[i]))
 		else:
-			# Middle layers
-			model.add(cell(layers['Size'][i], return_sequences=True, name=f'layer_{layers["Name"][i]}_{cell.__name__}'))
-		# Add dropout after each layer
+			# Add hidden layer that needs a return sequence as it's a stacked LSTM but no input shape
+			model.add(cell(units=layer_size[i], return_sequences=True))
+		# Add dropout after each layer to prevent overfitting
 		model.add(Dropout(dropout))
-	model.add(Dense(1, activation="linear"))
+		# The Dropout layer randomly sets input units to 0 with a frequency of 
+		# rate (= 0.2 above) at each step during training time, which helps 
+		# prevent overfitting (one of the major problems of ML).
+	# Add final dense layer to output prediction
+	model.add(Dense(1))
+	# Compile model with given optimizer and loss function
 	model.compile(optimizer=optimizer, loss=loss)
+	# The optimizer and loss are two important parameters when building an 
+	# ANN model. Choosing a different optimizer/loss can affect the prediction
+	# quality significantly. You should try other settings to learn; e.g.
+	# optimizer='rmsprop'/'sgd'/'adadelta'/...
+	# loss='mean_absolute_error'/'huber_loss'/'cosine_similarity'/...
 	
 	return model
 
-def train_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
-	# Builds the model
+def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model'):
+	# Trains the model
 	# Params:
 	# 	x_train		(list)	: The x training data
 	# 	y_train		(list)	: The y training data
 	#	refresh 	(bool)	: Whether to retrain the model even if it exists, default is False
 	#	save		(bool)	: Whether to save the model locally if it doesn't already exist, default is True
 	#	model_dir	(str)	: Directory to store model, default is 'model'
+	# Returns:
+	# 	model		(model)	: The trained model
 	
 	# Creates model directory if it doesn't exist
 	if not os.path.isdir(model_dir):
 		os.mkdir(model_dir)
-	
-	prediction_window = len(x_train[0])
 
-	# Shorthand for provided model path and generated filename
-	model_file_path = os.path.join(model_dir, f'model_{prediction_window}-window.keras')
+	# Model filename to ensure model is unique
+	model_file_path = os.path.join(model_dir, f"model_{hyperparameters['sequence_length']}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}.keras")
+	# Regex for possibilities of running multiple models: r'model_(\d+)_(\w+)_(\d+)_(\d+\.\d+)_(\w+)_(\w+)\.keras'
 
 	# Checks if data file with same data exists
 	if os.path.exists(model_file_path) and not refresh:
@@ -285,7 +272,7 @@ def train_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
 		model = load_model(model_file_path)
 		return model
 
-	model = create_model(x_train.shape[1])
+	model = create_model(hyperparameters['sequence_length'], hyperparameters['n_features'], hyperparameters['cell'], hyperparameters['layer_size'], hyperparameters['dropout'], hyperparameters['optimizer'], hyperparameters['loss'])
 
 	# Now we are going to train this model with our training data 
 	# (x_train, y_train)
@@ -302,15 +289,6 @@ def train_model(x_train, y_train, refresh=True, save=True, model_dir='model'):
 	# the aggreated errors/losses from a batch of, say, 32 input samples
 	# and update our model based on this aggregated loss.
 
-	# TO DO:
-	# Save the model and reload it
-	# Sometimes, it takes a lot of effort to train your model (again, look at
-	# a training data with billions of input samples). Thus, after spending so 
-	# much computing power to train your model, you may want to save it so that
-	# in the future, when you want to make the prediction, you only need to load
-	# your pre-trained model and run it on the new input for which the prediction
-	# need to be made.
-
 	if save:
 		model.save(model_file_path)
 
@@ -324,6 +302,8 @@ def predict_test(model, scaler, x_test, test_index, feature_columns=['Open', 'Hi
 	# 	x_test					: The test data to be used for prediction
 	#	test_index		(list)	: Datetime index of the test data to be added to prediction_df for graphs
 	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# Returns:
+	# 	prediction_df	(df)	: The predictions based on the test data
 
 	prediction_df = pd.DataFrame(index=test_index)
 
@@ -348,6 +328,8 @@ def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 
 	# 	predicted_df	(df)	: The predictions based on the test data
 	# 	days			(int)	: The amount of days to show in a candlestick, default is 1
 	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
+	# Returns:
+	# 	fig				(fig)	: The figure object to be shown
 
 	#------------------------------------------------------------------------------
 	# Plot the test predictions
@@ -409,6 +391,8 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	# 	predicted_df	(df)	: The predictions based on the test data
 	# 	days			(int)	: The amount of days to show in a candlestick, default is 1
 	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
+	# Returns:
+	# 	fig				(fig)	: The figure object to be shown
 
 	#------------------------------------------------------------------------------
 	# Plot the test predictions
@@ -503,20 +487,52 @@ def predict(model, scaler, model_inputs, prediction_days=60):
 
 	return prediction
 
+def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close']):
+	# Uses model and data to assess prediction
+	# Params:
+	# 	test_df			(df)	: The test data downloaded from yahoo
+	# 	predicted_df	(df)	: The predictions based on the test data
+	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
+	# Returns:
+	# 	feature_error	(dict)	: The average error and average error percentage for each feature
+
+	feature_error = {}
+	for column in feature_columns:
+		# Calculate the average error for each feature
+		average_error = np.mean(np.abs(test_df[column] - predicted_df[column]))
+		# Calculate the average error percentage for each feature
+		average_error_percentage = average_error / np.mean(test_df[column])
+		# Add the average error and average error percentage to the feature_error dict
+		feature_error[column] = (average_error, average_error_percentage)
+
+	return feature_error
+
 if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
-	END_DATE = '2023-12-31'
+	# END_DATE = '2023-12-31'
+	END_DATE = datetime.datetime.now().strftime('%Y-%m-%d')
 	CHOSEN_FEATURE = 'Close'
 	REFRESH = False
 	GRAPH_DAYS = 7
+	
+	# Make model hyperparameters
+	hyperparameters = {
+		'sequence_length': 60,
+		'n_features': 1,
+		'cell': GRU,
+		'layer_size': [50, 50, 50],
+		'dropout': 0.2,
+		'optimizer': 'adam',
+		'loss': 'mean_squared_error'
+	}
 
 	# Generate the dataset based on the company and the dates
-	dataset = load_data(COMPANY, START_DATE, END_DATE, 120, 0.1, REFRESH)
+	dataset = load_data(COMPANY, START_DATE, END_DATE, hyperparameters['sequence_length'], 0.1, REFRESH)
 
 	# Generate the model based on the training data
-	model = train_model(dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], REFRESH)
+	model = train_model(dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], hyperparameters, REFRESH)
 
 	# Make df of predictions to compare against test data
 	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
@@ -525,7 +541,12 @@ if __name__ == '__main__':
 	candlestick(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
 	# Show boxplot of prices
 	boxplot(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
-	
+
 	# Run the predictions based on the model and testing data
 	prediction = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE])
 	print(f'Prediction: {prediction}')
+
+	# Calculate the average error for each feature
+	error = error(dataset['test_df'], prediction_df, [CHOSEN_FEATURE])
+	for column in error:
+		print(f'Average error for {column}: ${error[column][0]:.2f} or {error[column][1]:.2%}')
