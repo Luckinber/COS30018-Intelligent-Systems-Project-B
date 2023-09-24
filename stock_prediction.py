@@ -246,9 +246,10 @@ def create_model(sequence_length, n_features=1, cell=LSTM, layer_size=[50, 50, 5
 	
 	return model
 
-def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model'):
+def train_model(company, x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model'):
 	# Trains the model
 	# Params:
+	# 	company		(str)	: The company you want to train on, examples include AAPL, TESL, etc.
 	# 	x_train		(list)	: The x training data
 	# 	y_train		(list)	: The y training data
 	#	refresh 	(bool)	: Whether to retrain the model even if it exists, default is False
@@ -262,8 +263,7 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 		os.mkdir(model_dir)
 
 	# Model filename to ensure model is unique
-	model_file_path = os.path.join(model_dir, f"model_{hyperparameters['sequence_length']}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}.keras")
-	# Regex for possibilities of running multiple models: r'model_(\d+)_(\w+)_(\d+)_(\d+\.\d+)_(\w+)_(\w+)\.keras'
+	model_file_path = os.path.join(model_dir, f"model_{company}_{hyperparameters['sequence_length']}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}.keras")
 
 	# Checks if data file with same data exists
 	if os.path.exists(model_file_path) and not refresh:
@@ -297,9 +297,9 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 def predict_test(model, scaler, x_test, test_index, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
-	# 	model					: The model previously generated to actually be tested
-	# 	scaler					: The scaler used to process the data so it can be de-normalised
-	# 	x_test					: The test data to be used for prediction
+	# 	model			(model)	: The model previously generated to actually be tested
+	# 	scaler			(scaler): The scaler used to process the data so it can be de-normalised
+	# 	x_test			(list)	: The x test data
 	#	test_index		(list)	: Datetime index of the test data to be added to prediction_df for graphs
 	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
 	# Returns:
@@ -455,20 +455,23 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 def predict(model, scaler, model_inputs, prediction_days=60):
 	# Uses model and data to make prediction
 	# Params:
-	# 	model					: The model previously generated to actually be tested
-	# 	scaler					: The scaler used to process the data so it can be de-normalised
+	# 	model			(model)	: The model previously generated to actually be tested
+	# 	scaler			(scaler): The scaler used to process the data so it can be de-normalised
 	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
 	# 	prediction_days	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
-
-	#------------------------------------------------------------------------------
-	# Predict next day
-	#------------------------------------------------------------------------------
-
+	# Returns:
+	# 	prediction		(list)	: The predicted price
+	
+	# Get the last prediction_days days of the model_inputs
 	real_data = [model_inputs[len(model_inputs) - prediction_days:, 0]]
+	# Turn the real_data into a numpy array
 	real_data = np.array(real_data)
+	# Reshape the real_data into a 3D array
 	real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
 
+	# Predict the price
 	prediction = model.predict(real_data)
+	# Inverse transform the prediction to get the actual price
 	prediction = scaler.inverse_transform(prediction)
 	# A few concluding remarks here:
 	# 1. The predictor is quite bad, especially if you look at the next day 
@@ -511,7 +514,6 @@ if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
-	# END_DATE = '2023-12-31'
 	END_DATE = datetime.datetime.now().strftime('%Y-%m-%d')
 	CHOSEN_FEATURE = 'Close'
 	REFRESH = False
@@ -532,7 +534,7 @@ if __name__ == '__main__':
 	dataset = load_data(COMPANY, START_DATE, END_DATE, hyperparameters['sequence_length'], 0.1, REFRESH)
 
 	# Generate the model based on the training data
-	model = train_model(dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], hyperparameters, REFRESH)
+	model = train_model(COMPANY, dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], hyperparameters, REFRESH)
 
 	# Make df of predictions to compare against test data
 	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
@@ -544,7 +546,7 @@ if __name__ == '__main__':
 
 	# Run the predictions based on the model and testing data
 	prediction = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE])
-	print(f'Prediction: {prediction}')
+	print(f'Predicted price at close tomorrow: ${prediction[0][0]:.2f}')
 
 	# Calculate the average error for each feature
 	error = error(dataset['test_df'], prediction_df, [CHOSEN_FEATURE])
