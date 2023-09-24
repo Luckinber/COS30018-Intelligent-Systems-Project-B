@@ -461,7 +461,7 @@ def predict(model, scaler, model_inputs, prediction_days=60):
 	# 	prediction_days	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
 	# Returns:
 	# 	prediction		(list)	: The predicted price
-	
+
 	# Get the last prediction_days days of the model_inputs
 	real_data = [model_inputs[len(model_inputs) - prediction_days:, 0]]
 	# Turn the real_data into a numpy array
