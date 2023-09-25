@@ -452,44 +452,6 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 
 	return fig
 
-def predict(model, scaler, model_inputs, prediction_days=60):
-	# Uses model and data to make prediction
-	# Params:
-	# 	model			(model)	: The model previously generated to actually be tested
-	# 	scaler			(scaler): The scaler used to process the data so it can be de-normalised
-	# 	actual_prices	(list)	: The prices downloaded from yahoo to compare against
-	# 	prediction_days	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
-	# Returns:
-	# 	prediction		(list)	: The predicted price
-
-	# Get the last prediction_days days of the model_inputs
-	real_data = [model_inputs[len(model_inputs) - prediction_days:, 0]]
-	# Turn the real_data into a numpy array
-	real_data = np.array(real_data)
-	# Reshape the real_data into a 3D array
-	real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
-
-	# Predict the price
-	prediction = model.predict(real_data)
-	# Inverse transform the prediction to get the actual price
-	prediction = scaler.inverse_transform(prediction)
-	# A few concluding remarks here:
-	# 1. The predictor is quite bad, especially if you look at the next day 
-	# prediction, it missed the actual price by about 10%-13%
-	# Can you find the reason?
-	# 2. The code base at
-	# https://github.com/x4nth055/pythoncode-tutorials/tree/master/machine-learning/stock-prediction
-	# gives a much better prediction. Even though on the surface, it didn't seem 
-	# to be a big difference (both use Stacked LSTM)
-	# Again, can you explain it?
-	# A more advanced and quite different technique use CNN to analyse the images
-	# of the stock price changes to detect some patterns with the trend of
-	# the stock price:
-	# https://github.com/jason887/Using-Deep-Learning-Neural-Networks-and-Candlestick-Chart-Representation-to-Predict-Stock-Market
-	# Can you combine these different techniques for a better prediction??
-
-	return prediction
-
 def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close']):
 	# Uses model and data to assess prediction
 	# Params:
@@ -510,6 +472,56 @@ def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close'
 
 	return feature_error
 
+def predict(model, scaler, model_inputs, prediction_window=60, days_forward=1):
+	# Uses model and data to make prediction
+	# Params:
+	# 	model				(model)	: The model previously generated to actually be tested
+	# 	scaler				(scaler): The scaler used to process the data so it can be de-normalised
+	# 	actual_prices		(list)	: The prices downloaded from yahoo to compare against
+	# 	prediction_window	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
+	# 	days_forward		(int)	: How many days forward the prediction should be, default is 1 (e.g. next day)
+	# Returns:
+	# 	prediction			(list)	: The predicted price
+
+	# Get the last prediction_window days of the model_inputs
+	real_data = [model_inputs[len(model_inputs) - prediction_window:, 0]]
+	# Turn the real_data into a numpy array
+	real_data = np.array(real_data)
+	# Reshape the real_data into a 3D array
+	real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
+
+	predictions = []
+	for i in range(days_forward):
+		# Predict the price
+		prediction = model.predict(real_data)
+		# Add the prediction to the real_data
+		real_data = np.concatenate((real_data, prediction[:, np.newaxis, :]), axis=1)
+		# Remove the first value of real_data to keep the length the same
+		real_data = np.delete(real_data, 0, axis=1)
+		# Inverse transform the prediction to get the actual price
+		prediction = scaler.inverse_transform(prediction)
+		# Add the prediction to the predictions list
+		predictions.append(prediction)
+
+		# A few concluding remarks here:
+		# 1. The predictor is quite bad, especially if you look at the next day 
+		# prediction, it missed the actual price by about 10%-13%
+		# Can you find the reason?
+		# 2. The code base at
+		# https://github.com/x4nth055/pythoncode-tutorials/tree/master/machine-learning/stock-prediction
+		# gives a much better prediction. Even though on the surface, it didn't seem 
+		# to be a big difference (both use Stacked LSTM)
+		# Again, can you explain it?
+		# A more advanced and quite different technique use CNN to analyse the images
+		# of the stock price changes to detect some patterns with the trend of
+		# the stock price:
+		# https://github.com/jason887/Using-Deep-Learning-Neural-Networks-and-Candlestick-Chart-Representation-to-Predict-Stock-Market
+		# Can you combine these different techniques for a better prediction??
+
+	# Turn the predictions into a numpy array
+	predictions = np.array(predictions).reshape(-1, 1)
+	return predictions
+
 if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
@@ -518,6 +530,7 @@ if __name__ == '__main__':
 	CHOSEN_FEATURE = 'Close'
 	REFRESH = False
 	GRAPH_DAYS = 7
+	FUTURE_DAYS = 7
 	
 	# Make model hyperparameters
 	hyperparameters = {
@@ -544,11 +557,12 @@ if __name__ == '__main__':
 	# Show boxplot of prices
 	boxplot(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
 
-	# Run the predictions based on the model and testing data
-	prediction = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE])
-	print(f'Predicted price at close tomorrow: ${prediction[0][0]:.2f}')
-
 	# Calculate the average error for each feature
 	error = error(dataset['test_df'], prediction_df, [CHOSEN_FEATURE])
 	for column in error:
 		print(f'Average error for {column}: ${error[column][0]:.2f} or {error[column][1]:.2%}')
+
+	# Run the predictions based on the model and testing data
+	print(f'Predicting price in {FUTURE_DAYS} days')
+	predictions = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE], hyperparameters['sequence_length'], FUTURE_DAYS)
+	print(f'Predicted price in {len(predictions)} days: ${predictions[-1, 0]:.2f}')
