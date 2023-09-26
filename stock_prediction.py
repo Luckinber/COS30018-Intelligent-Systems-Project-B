@@ -10,51 +10,34 @@
 import numpy as np
 import plotly.graph_objects as graphs
 import pandas as pd
-import pandas_datareader as web
-import datetime as dt
 import tensorflow as tf
 import yfinance as yf
-import datetime
 import os
 
+from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, InputLayer, LSTM, SimpleRNN, GRU
 
-def load_data(company, start_date, end_date, prediction_window=60, split=0.2, refresh=True, save=True, data_dir='data', feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
-	# Loads data from Yahoo Finance source, as well as scaling, normalizing and splitting.
+def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='data'):
+	# Loads data from Yahoo Finance source.
     # Params:
-	# 	company				(str)			: The company you want to train on, examples include AAPL, TESL, etc.
-	#	start_date			(str)			: The start date for the data
-	#	end_date			(str)			: The end date for the data
-	#	prediction_window	(int)			: The historical sequence length used to predict, default is 60
-	# 	split 				(str, float)	: Date string or float between 0 and 1 that defines split
-	#	refresh				(bool)			: Whether to redownload data even if it exists, default is True
-	#	save				(bool)			: Whether to save the data locally if it doesn't already exist, default is True
-	#	data_dir			(str)			: Directory to store data, default is 'data'
-	# 	feature_columns		(list)			: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# 	company		(str)	: The company you want to train on, examples include AAPL, TESL, etc.
+	#	start_date	(str)	: The start date for the data
+	#	end_date	(str)	: The end date for the data
+	#	refresh		(bool)	: Whether to redownload data even if it exists, default is True
+	#	save		(bool)	: Whet	her to save the data locally if it doesn't already exist, default is True
+	#	data_dir	(str)	: Directory to store data, default is 'data'
 	# Returns:
-	# 	dataset				(dict)			: The dataset dictionary containing all the data
-
-	try:
-		split_is_date = bool(datetime.strptime(split, '%Y-%m-%d'))
-	except:
-		split_is_date = False
-
-	try:
-		split_is_float = bool(0 < split < 1)
-	except:
-		split_is_float = False
-	
-	assert split_is_date or split_is_float, f'split must be a float between 0 and 1 or a string (\'yyyy-mm-dd\')'
+	# 	dataset		(dict)	: The dataset dictionary containing the df
 
 	# Creates data directory if it doesn't exist
 	if not os.path.isdir(data_dir):
 		os.mkdir(data_dir)
 		
 	# Shorthand for provided data path and generated filename
-	df_file_path = os.path.join(data_dir, f'{company}_{start_date}-{end_date}_{prediction_window}-window.csv')
+	df_file_path = os.path.join(data_dir, f'{company}_{start_date}-{end_date}.csv')
 
 	# Checks if data file with same data exists
 	if os.path.exists(df_file_path) and not refresh:
@@ -67,56 +50,61 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 		# Save data to data file for loading next run if saving is on
 		if save:
 			df.to_csv(df_file_path)
+	
+	# Drop NaNs
+	df.dropna(inplace=True)
+
+	return df
+
+def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
+	# Scales, normalizes and splits the data into training and testing data
+	# Params:
+	# 	df				(df)	: The dataframe to be processed
+	# 	sequence_length	(int)	: The historical sequence length used to predict
+	# 	split			(float)	: The percentage of data to be used for testing, default is 0.2
+	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
 
 	# make sure that the passed feature_columns exist in the dataframe
 	for col in feature_columns:
 		assert col in df.columns, f'{col} does noxt exist in the dataframe.'
 
-	# Create dataset dictionary to store outputs
-	dataset = {}
-    # Store the original dataframe itself
-	dataset['stock_df'] = df.copy()
+	try:
+		split_is_date = isinstance(datetime.strptime(split, '%Y-%m-%d'), datetime)
+	except:
+		split_is_date = False
+	split_is_float = isinstance(split, float) and 0 < split < 1
 	
-	# Drop NaNs
-	df.dropna(inplace=True)
-
-	# For more details: 
-	# https://pandas.pydata.org/pandas-docs/stable/user_guide/dsintro.html
-	#------------------------------------------------------------------------------
-	# Prepare Data
-	## To do:
-	# 1) Use a different price value eg. mid-point of Open & Close
-	#------------------------------------------------------------------------------
+	# Ensure that split is valid
+	assert split_is_date or split_is_float, f'split must be a float between 0 and 1 or a string (\'yyyy-mm-dd\')'
 
 	# If split is false, split the dataframe into training and testing data based on the split
 	if split_is_float:
 		# Convert the split percentage to a index
 		train_start = int((1 - split) * len(df))
-		# train contains all values before that index
-		train = df[:train_start]
-		# test contains all values after that index
-		test = df[train_start:]
+		# train_df contains all values before that index
+		train_df = df[:train_start]
+		# test_df contains all values after that index
+		test_df = df[train_start:]
 	# If split is a date, split the dataframe into training and testing based on that date
 	else:
-		# train contains all values before test_start_date
-		train = df[df.index < split]
-		# test contains all values after test_start_date
-		test = df[df.index > split]
-	# Add the train and test df to the dataset
-	dataset['train_df'] = train
-	dataset['test_df'] = test
+		# train_df contains all values before test_start_date
+		train_df = df[df.index < split]
+		# test_df contains all values after test_start_date
+		test_df = df[df.index > split]
 
 	# Create dicts to store verions of each value for feature_columns
-	column_scaler = {}
-	column_x_train, column_y_train = {}, {}
-	column_x_test, column_y_test = {}, {}
+	# Column scalers are used to scale the data to the range (0,1)
+	column_scaler = {column: MinMaxScaler(feature_range=(0, 1)) for column in feature_columns}
+	# Column x_train and y_train are used to store the training data
+	column_x_train = {column: [] for column in feature_columns}
+	column_y_train = {column: [] for column in feature_columns}
+	# Column x_test and y_test are used to store the testing data
+	column_x_test = {column: [] for column in feature_columns}
+	column_y_test = {column: [] for column in feature_columns}
+	# Column model_inputs are used to store the inputs for the model
 	column_model_inputs = {}
 
 	for column in feature_columns:
-		# Scaling each feature_column from 0 to 1
-		# Note that, by default, feature_range=(0, 1). Thus, if you want a different 
-		# 	feature_range (min,max) then you'll need to specify it here
-		scaler = MinMaxScaler(feature_range=(0, 1))
 		# Flatten and normalise the df
 		# First, we reshape a 1D array(n) to 2D array(n,1)
 		# We have to do that because sklearn.preprocessing.fit_transform()
@@ -131,67 +119,55 @@ def load_data(company, start_date, end_date, prediction_window=60, split=0.2, re
 		# When using a -1, the dimension corresponding to the -1 will be the product of 
 		# 	the dimensions of the original array divided by the product of the dimensions 
 		# 	given to reshape so as to maintain the same number of elements.
-		test_scaled_data = scaler.fit_transform(train[column].values.reshape(-1, 1))
-		# Save scalar used
-		column_scaler[column] = scaler
+		test_scaled_data = column_scaler[column].fit_transform(train_df[column].values.reshape(-1, 1))
 		# Turn the 2D array back to a 1D array
 		test_scaled_data = test_scaled_data[:,0]
 
-
-		# Arrays for x and y data
-		x_train, y_train = [], []
-
 		# Prepare the training data
-		for i in range(prediction_window, len(test_scaled_data)):
-			# Offset x and y data by prediction_window
-			x_train.append(test_scaled_data[i-prediction_window:i])
-			y_train.append(test_scaled_data[i])
+		for i in range(sequence_length, len(test_scaled_data)):
+			# Offset x and y data by sequence_length
+			column_x_train[column].append(test_scaled_data[i-sequence_length:i])
+			column_y_train[column].append(test_scaled_data[i])
 			
 		# Convert them into an array
-		x_train, y_train = np.array(x_train), np.array(y_train)
-		# Now, x is a 2D array(p,q) where p = len(test_scaled_data) - prediction_window
-		# and q = prediction_window; while y is a 1D array(p)
+		column_x_train[column], column_y_train[column] = np.array(column_x_train[column]), np.array(column_y_train[column])
+		# Now, x is a 2D array(p,q) where p = len(test_scaled_data) - sequence_length
+		# and q = sequence_length; while y is a 1D array(p)
 
 		# We now reshape x into a 3D array(p, q, 1); Note that x
 		# 	is an array of p inputs with each input being a 2D array
-		x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
+		column_x_train[column] = np.reshape(column_x_train[column], (column_x_train[column].shape[0], column_x_train[column].shape[1], 1))
 
-		# Store the training data in the dicts under the name of the feature_column
-		column_x_train[column], column_y_train[column] = x_train, y_train
-
-		# Create the inputs which is the amount of prediction_window and all the test data
-		model_inputs = df[column][len(df[column]) - len(test) - prediction_window:].values
+		# Create the inputs which is the amount of sequence_length and all the test data
+		column_model_inputs[column] = df[column][len(df[column]) - len(test_df) - sequence_length:].values
 		# Scale model_inputs using the previously used scaler
-		model_inputs = scaler.transform(model_inputs.reshape(-1, 1))
-		# Save model_inputs to dict to be added to the dataset
-		column_model_inputs[column] = model_inputs
+		column_model_inputs[column] = column_scaler[column].transform(column_model_inputs[column].reshape(-1, 1))
 
-		# Create test data arrays
-		x_test, y_test = [], []
-		
 		# Prepare the testing data
-		for i in range(prediction_window, len(model_inputs)):
+		for i in range(sequence_length, len(column_model_inputs[column])):
 			# Offset x and y by prediction window
-			x_test.append(model_inputs[i - prediction_window:i, 0])
-			y_test.append(test_scaled_data[i])
+			column_x_test[column].append(column_model_inputs[column][i - sequence_length:i, 0])
+			column_y_test[column].append(test_scaled_data[i])
 
-		# Convert test data into numpy arrays
-		x_test, y_test = np.array(x_test), np.array(y_test)
+		# Convert test_df data into numpy arrays
+		column_x_test[column], column_y_test[column] = np.array(column_x_test[column]), np.array(column_y_test[column])
 		# We now reshape x into a 3D array(p, q, 1); Note that x
 		# 	is an array of p inputs with each input being a 2D array
-		x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
+		column_x_test[column] = np.reshape(column_x_test[column], (column_x_test[column].shape[0], column_x_test[column].shape[1], 1))
 
-		# Store the model_inputs in the dicts under the name of the feature_column
-		column_x_test[column], column_y_test[column] = x_test, y_test
-
-	# Add the MinMaxScaler instances to the dataset
-	dataset['column_scaler'] = column_scaler
-	# Add the training data instances to the dataset
-	dataset['column_x_train'], dataset['column_y_train'] = column_x_train, column_y_train
-	# Add the test data instances to the dataset
-	dataset['column_x_test'], dataset['column_y_test'] = column_x_test, column_y_test
-	# Add the model_inputs instances to the dataset
-	dataset['column_model_inputs'] = column_model_inputs
+	
+	# Create dataset dictionary to store all the data
+	dataset = {
+		'stock_df': df.copy(),
+		'train_df': train_df,
+		'test_df': test_df,
+		'column_scaler': column_scaler,
+		'column_x_train': column_x_train,
+		'column_y_train': column_y_train,
+		'column_x_test': column_x_test,
+		'column_y_test': column_y_test,
+		'column_model_inputs': column_model_inputs
+	}
 
 	return dataset
 
@@ -272,6 +248,7 @@ def train_model(company, x_train, y_train, hyperparameters, refresh=True, save=T
 		model = load_model(model_file_path)
 		return model
 
+	# Create model based on hyperparameters
 	model = create_model(hyperparameters['sequence_length'], hyperparameters['n_features'], hyperparameters['cell'], hyperparameters['layer_size'], hyperparameters['dropout'], hyperparameters['optimizer'], hyperparameters['loss'])
 
 	# Now we are going to train this model with our training data 
@@ -472,19 +449,19 @@ def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close'
 
 	return feature_error
 
-def predict(model, scaler, model_inputs, prediction_window=60, days_forward=1):
+def predict(model, scaler, model_inputs, sequence_length=60, days_forward=1):
 	# Uses model and data to make prediction
 	# Params:
 	# 	model				(model)	: The model previously generated to actually be tested
 	# 	scaler				(scaler): The scaler used to process the data so it can be de-normalised
 	# 	actual_prices		(list)	: The prices downloaded from yahoo to compare against
-	# 	prediction_window	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
+	# 	sequence_length	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
 	# 	days_forward		(int)	: How many days forward the prediction should be, default is 1 (e.g. next day)
 	# Returns:
 	# 	prediction			(list)	: The predicted price
 
-	# Get the last prediction_window days of the model_inputs
-	real_data = [model_inputs[len(model_inputs) - prediction_window:, 0]]
+	# Get the last sequence_length days of the model_inputs
+	real_data = [model_inputs[len(model_inputs) - sequence_length:, 0]]
 	# Turn the real_data into a numpy array
 	real_data = np.array(real_data)
 	# Reshape the real_data into a 3D array
@@ -526,7 +503,7 @@ if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
-	END_DATE = datetime.datetime.now().strftime('%Y-%m-%d')
+	END_DATE = datetime.now().strftime('%Y-%m-%d')
 	CHOSEN_FEATURE = 'Close'
 	REFRESH = False
 	GRAPH_DAYS = 7
@@ -544,7 +521,10 @@ if __name__ == '__main__':
 	}
 
 	# Generate the dataset based on the company and the dates
-	dataset = load_data(COMPANY, START_DATE, END_DATE, hyperparameters['sequence_length'], 0.1, REFRESH)
+	df = load_data(COMPANY, START_DATE, END_DATE, REFRESH)
+
+	# Prepare the data for training and testing
+	dataset = prepare_data(df, hyperparameters['sequence_length'], 0.1)
 
 	# Generate the model based on the training data
 	model = train_model(COMPANY, dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], hyperparameters, REFRESH)
