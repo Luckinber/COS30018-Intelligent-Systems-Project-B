@@ -163,4 +163,4 @@ refference-p1/
 data/
 model/
 logs/
-results/
+checkpoints/

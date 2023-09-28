@@ -20,6 +20,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, InputLayer, LSTM, SimpleRNN, GRU
+from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
 
 def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='data'):
 	# Loads data from Yahoo Finance source.
@@ -187,7 +188,7 @@ def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, o
 	
 	return model
 
-def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model'):
+def train_model(x_train, y_train, x_test, y_test, hyperparameters, refresh=True, save=True, model_dir='model', checkpoint_dir='checkpoints', logs_dir='logs'):
 	# Trains the model
 	# Params:
 	# 	x_train		(list)	: The x training data
@@ -202,22 +203,42 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 	if not os.path.isdir(model_dir):
 		os.mkdir(model_dir)
 
-	# Model filename to ensure model is unique
-	model_file_path = os.path.join(model_dir, f"model_{x_train.shape[1:]}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}.keras")
+	# Creates checkpoint directory if it doesn't exist
+	if not os.path.isdir(checkpoint_dir):
+		os.mkdir(checkpoint_dir)
+
+	# Creates logs directory if it doesn't exist
+	if not os.path.isdir(logs_dir):
+		os.mkdir(logs_dir)
+
+	# Model name to ensure model is unique
+	model_name = f"model_{x_train.shape[1:]}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}"
 
 	# Checks if data file with same data exists
-	if os.path.exists(model_file_path) and not refresh:
+	if os.path.exists(os.path.join(model_dir, model_name + '.keras')) and not refresh:
 		# If file exists and data shouldn't be updated, import as pandas data frame object
 		# 'index_col=0' makes the date the index rather than making a new coloumn
-		model = load_model(model_file_path)
+		model = load_model(os.path.join(model_dir, model_name + '.keras'))
 		return model
 
 	# Create model based on hyperparameters
 	model = create_model(x_train.shape[1:], hyperparameters['cell'], hyperparameters['layer_size'], hyperparameters['dropout'], hyperparameters['optimizer'], hyperparameters['loss'])
 
-	# Now we are going to train this model with our training data 
-	# (x_train, y_train)
-	model.fit(x_train, y_train, epochs=25, batch_size=32)
+	# Save model checkpoints
+	checkpointer = ModelCheckpoint(os.path.join(checkpoint_dir, model_name + '.ckpt'), save_weights_only=True, save_best_only=True, verbose=1)
+	# Save model logs
+	tensorboard = TensorBoard(log_dir=os.path.join(logs_dir, model_name))
+
+	# Train model
+	model.fit(
+		x_train,
+		y_train,
+		epochs=hyperparameters['eopchs'],
+		batch_size=hyperparameters['batch_size'],
+		validation_data=(x_test, y_test),
+		callbacks=[checkpointer, tensorboard],
+		verbose=1
+	)
 	# Other parameters to consider: How many rounds(epochs) are we going to 
 	# train our model? Typically, the more the better, but be careful about
 	# overfitting!
@@ -230,8 +251,9 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 	# the aggreated errors/losses from a batch of, say, 32 input samples
 	# and update our model based on this aggregated loss.
 
+	# Save model if saving is on
 	if save:
-		model.save(model_file_path)
+		model.save(model_dir, model_name + '.keras')
 
 	return model
 
@@ -450,7 +472,9 @@ if __name__ == '__main__':
 		'layer_size': [50, 50, 50],
 		'dropout': 0.2,
 		'optimizer': 'adam',
-		'loss': 'mean_squared_error'
+		'loss': 'mean_squared_error',
+		'eopchs': 25,
+		'batch_size': 32
 	}
 
 	# Generate the dataset based on the company and the dates
@@ -460,7 +484,7 @@ if __name__ == '__main__':
 	dataset = prepare_data(df, SEQUENCE_LENGTH, 0.1)
 
 	# Generate the model based on the training data
-	model = train_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
+	model = train_model(dataset['x_train'], dataset['y_train'], dataset['x_test'], dataset['y_test'], hyperparameters, REFRESH)
 
 	# Make df of predictions to compare against test data
 	prediction_df = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
