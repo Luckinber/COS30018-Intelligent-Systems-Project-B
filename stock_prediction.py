@@ -14,7 +14,8 @@ import tensorflow as tf
 import yfinance as yf
 import os
 
-from datetime import datetime
+from plotly.subplots import make_subplots
+from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
@@ -56,7 +57,7 @@ def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='
 
 	return df
 
-def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
+def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Scales, normalizes and splits the data into training and testing data
 	# Params:
 	# 	df				(df)	: The dataframe to be processed
@@ -92,97 +93,61 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 		# test_df contains all values after test_start_date
 		test_df = df[df.index > split]
 
-	# Create dicts to store verions of each value for feature_columns
-	# Column scalers are used to scale the data to the range (0,1)
-	column_scaler = {column: MinMaxScaler(feature_range=(0, 1)) for column in feature_columns}
-	# Column x_train and y_train are used to store the training data
-	column_x_train = {column: [] for column in feature_columns}
-	column_y_train = {column: [] for column in feature_columns}
-	# Column x_test and y_test are used to store the testing data
-	column_x_test = {column: [] for column in feature_columns}
-	column_y_test = {column: [] for column in feature_columns}
-	# Column model_inputs are used to store the inputs for the model
-	column_model_inputs = {}
+	scaler = MinMaxScaler(feature_range=(0, 1))
+	scaled_data = scaler.fit_transform(df[feature_columns].values)
 
-	for column in feature_columns:
-		# Flatten and normalise the df
-		# First, we reshape a 1D array(n) to 2D array(n,1)
-		# We have to do that because sklearn.preprocessing.fit_transform()
-		# requires a 2D array
-		# Here n == len(test_scaled_data)
-		# Then, we scale the whole array to the range (0,1)
-		# The parameter -1 allows (np.)reshape to figure out the array size n automatically 
-		# 	values.reshape(-1, 1) 
-		# https://stackoverflow.com/questions/18691084/what-does-1-mean-in-numpy-reshape'
-		# When reshaping an array, the new shape must contain the same number of elements 
-		# 	as the old shape, meaning the products of the two shapes' dimensions must be equal. 
-		# When using a -1, the dimension corresponding to the -1 will be the product of 
-		# 	the dimensions of the original array divided by the product of the dimensions 
-		# 	given to reshape so as to maintain the same number of elements.
-		test_scaled_data = column_scaler[column].fit_transform(train_df[column].values.reshape(-1, 1))
-		# Turn the 2D array back to a 1D array
-		test_scaled_data = test_scaled_data[:,0]
+	x_train, y_train = [], []
+	# Prepare training data
+	for i in range(sequence_length, len(train_df)):
+		# Add the previous sequence_length values to x_train
+		x_train.append(scaled_data[i - sequence_length: i])
+		# Add the current value to y_train
+		y_train.append(scaled_data[i])
 
-		# Prepare the training data
-		for i in range(sequence_length, len(test_scaled_data)):
-			# Offset x and y data by sequence_length
-			column_x_train[column].append(test_scaled_data[i-sequence_length:i])
-			column_y_train[column].append(test_scaled_data[i])
-			
-		# Convert them into an array
-		column_x_train[column], column_y_train[column] = np.array(column_x_train[column]), np.array(column_y_train[column])
-		# Now, x is a 2D array(p,q) where p = len(test_scaled_data) - sequence_length
-		# and q = sequence_length; while y is a 1D array(p)
+	x_test, y_test = [], []
+	# Prepare testing data
+	for i in range(len(train_df), len(scaled_data)):
+		# Add the previous sequence_length values to x_test
+		x_test.append(scaled_data[i - sequence_length: i])
+		# Add the current value to y_test
+		y_test.append(scaled_data[i])
 
-		# We now reshape x into a 3D array(p, q, 1); Note that x
-		# 	is an array of p inputs with each input being a 2D array
-		column_x_train[column] = np.reshape(column_x_train[column], (column_x_train[column].shape[0], column_x_train[column].shape[1], 1))
+	# Convert them into numpy arrays
+	x_train, y_train = np.array(x_train), np.array(y_train)
+	x_test, y_test = np.array(x_test), np.array(y_test)
 
-		# Create the inputs which is the amount of sequence_length and all the test data
-		column_model_inputs[column] = df[column][len(df[column]) - len(test_df) - sequence_length:].values
-		# Scale model_inputs using the previously used scaler
-		column_model_inputs[column] = column_scaler[column].transform(column_model_inputs[column].reshape(-1, 1))
+	# Reshape the data to be 3-dimensional in the form [number of samples, sequence length, number of features]
+	x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], len(feature_columns)))
+	x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], len(feature_columns)))
 
-		# Prepare the testing data
-		for i in range(sequence_length, len(column_model_inputs[column])):
-			# Offset x and y by prediction window
-			column_x_test[column].append(column_model_inputs[column][i - sequence_length:i, 0])
-			column_y_test[column].append(test_scaled_data[i])
+	model_inputs = x_test[-sequence_length:, 0]
+	model_inputs = np.reshape(model_inputs, (1, model_inputs.shape[0], len(feature_columns)))
 
-		# Convert test_df data into numpy arrays
-		column_x_test[column], column_y_test[column] = np.array(column_x_test[column]), np.array(column_y_test[column])
-		# We now reshape x into a 3D array(p, q, 1); Note that x
-		# 	is an array of p inputs with each input being a 2D array
-		column_x_test[column] = np.reshape(column_x_test[column], (column_x_test[column].shape[0], column_x_test[column].shape[1], 1))
-
-	
-	# Create dataset dictionary to store all the data
 	dataset = {
 		'stock_df': df.copy(),
 		'train_df': train_df,
 		'test_df': test_df,
-		'column_scaler': column_scaler,
-		'column_x_train': column_x_train,
-		'column_y_train': column_y_train,
-		'column_x_test': column_x_test,
-		'column_y_test': column_y_test,
-		'column_model_inputs': column_model_inputs
+		'scaler': scaler,
+		'x_train': x_train,
+		'y_train': y_train,
+		'x_test': x_test,
+		'y_test': y_test,
+		'model_inputs': model_inputs
 	}
 
 	return dataset
 
-def create_model(sequence_length, n_features=1, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, optimizer='adam', loss='mean_squared_error'):
+def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, optimizer='adam', loss='mean_squared_error', feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Builds the model
 	# Params:
-	# 	sequence_length	(int)	: The historical sequence length used to predict
-	# 	n_features		(int)	: The number of features used to predict, default is 1
-	# 	cell			(func)	: The type of cell to use in the model, default is LSTM
-	# 	layer_size		(list)	: The size of each layer in the model, default is [50, 50, 50]
-	# 	dropout			(float)	: The dropout rate to use in the model, default is 0.2
-	# 	optimizer		(str)	: The optimizer to use in the model, default is 'adam'
-	# 	loss			(str)	: The loss function to use in the model, default is 'mean_squared_error'
+	# 	input_shape	(list)	: The shape of the input data
+	# 	cell		(func)	: The type of cell to use in the model, default is LSTM
+	# 	layer_size	(list)	: The size of each layer in the model, default is [50, 50, 50]
+	# 	dropout		(float)	: The dropout rate to use in the model, default is 0.2
+	# 	optimizer	(str)	: The optimizer to use in the model, default is 'adam'
+	# 	loss		(str)	: The loss function to use in the model, default is 'mean_squared_error'
 	# Returns:
-	# 	model			(model)	: The model to be trained
+	# 	model		(model)	: The model to be trained
 
 	# Basic neural network
 	model = Sequential()
@@ -191,7 +156,7 @@ def create_model(sequence_length, n_features=1, cell=LSTM, layer_size=[50, 50, 5
 		# Create cell based on cell type
 		if i == 0:
 			# Add input layer that needs input shape defined
-			model.add(InputLayer(input_shape=(sequence_length, n_features)))
+			model.add(InputLayer(input_shape=input_shape))
 			model.add(cell(units=layer_size[i], return_sequences=True))
 			# For som eadvances explanation of return_sequences:
 			# https://machinelearningmastery.com/return-sequences-and-return-states-for-lstms-in-keras/
@@ -211,7 +176,7 @@ def create_model(sequence_length, n_features=1, cell=LSTM, layer_size=[50, 50, 5
 		# rate (= 0.2 above) at each step during training time, which helps 
 		# prevent overfitting (one of the major problems of ML).
 	# Add final dense layer to output prediction
-	model.add(Dense(1))
+	model.add(Dense(len(feature_columns), activation='linear'))
 	# Compile model with given optimizer and loss function
 	model.compile(optimizer=optimizer, loss=loss)
 	# The optimizer and loss are two important parameters when building an 
@@ -222,10 +187,9 @@ def create_model(sequence_length, n_features=1, cell=LSTM, layer_size=[50, 50, 5
 	
 	return model
 
-def train_model(company, x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model'):
+def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model'):
 	# Trains the model
 	# Params:
-	# 	company		(str)	: The company you want to train on, examples include AAPL, TESL, etc.
 	# 	x_train		(list)	: The x training data
 	# 	y_train		(list)	: The y training data
 	#	refresh 	(bool)	: Whether to retrain the model even if it exists, default is False
@@ -239,7 +203,7 @@ def train_model(company, x_train, y_train, hyperparameters, refresh=True, save=T
 		os.mkdir(model_dir)
 
 	# Model filename to ensure model is unique
-	model_file_path = os.path.join(model_dir, f"model_{company}_{hyperparameters['sequence_length']}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}.keras")
+	model_file_path = os.path.join(model_dir, f"model_{x_train.shape[1:]}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}.keras")
 
 	# Checks if data file with same data exists
 	if os.path.exists(model_file_path) and not refresh:
@@ -249,7 +213,7 @@ def train_model(company, x_train, y_train, hyperparameters, refresh=True, save=T
 		return model
 
 	# Create model based on hyperparameters
-	model = create_model(hyperparameters['sequence_length'], hyperparameters['n_features'], hyperparameters['cell'], hyperparameters['layer_size'], hyperparameters['dropout'], hyperparameters['optimizer'], hyperparameters['loss'])
+	model = create_model(x_train.shape[1:], hyperparameters['cell'], hyperparameters['layer_size'], hyperparameters['dropout'], hyperparameters['optimizer'], hyperparameters['loss'])
 
 	# Now we are going to train this model with our training data 
 	# (x_train, y_train)
@@ -271,34 +235,62 @@ def train_model(company, x_train, y_train, hyperparameters, refresh=True, save=T
 
 	return model
 
-def predict_test(model, scaler, x_test, test_index, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
+def predict(model, scaler, x_test, dates, predictions=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
-	# 	model			(model)	: The model previously generated to actually be tested
-	# 	scaler			(scaler): The scaler used to process the data so it can be de-normalised
-	# 	x_test			(list)	: The x test data
-	#	test_index		(list)	: Datetime index of the test data to be added to prediction_df for graphs
-	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# 	model				(model)	: The model previously generated to actually be tested
+	# 	scaler				(scaler): The scaler used to process the data so it can be de-normalised
+	# 	x_test				(list)	: The x testing data
+	# 	dates				(list)	: The dates to be used for the predictions
+	# 	predictions			(int)	: The amount of days to predict, default is 1
+	# 	feature_columns		(list)	: The list of features to be predicted on, default is everything grabbed from yahoo
 	# Returns:
-	# 	prediction_df	(df)	: The predictions based on the test data
+	# 	predicted_df		(df)	: The predictions based on the test data
 
-	prediction_df = pd.DataFrame(index=test_index)
+	for i in range(predictions):
+		# Predict the price
+		prediction = model.predict(x_test)
+		# Add the prediction to the x_test
+		x_test = np.concatenate((x_test, prediction[:, np.newaxis, :]), axis=1)
+		# Remove the first value of x_test to keep the length the same
+		x_test = np.delete(x_test, 0, axis=1)
+		# Inverse transform the prediction to get the actual price
+		prediction = scaler.inverse_transform(prediction)
+		# # Add the prediction to the predicted_df
+		# predicted_df.iloc[i] = prediction[0]
 
-	#------------------------------------------------------------------------------
-	# Make predictions on test data
-	#------------------------------------------------------------------------------
+		# Add the prediction to the prices
+		try:
+			# If prices doesn't exist, create it
+			prices
+		except NameError:
+			# Set prices to the prediction
+			prices = prediction
+		else:
+			# Add the prediction to prices
+			prices = np.vstack((prices, prediction))
 
-	for column in feature_columns:
-		predicted_prices = model.predict(x_test[column])
-		# Clearly, as we transform our data into the normalized range (0,1),
-		# we now need to reverse this transformation
-		predicted_prices = scaler[column].inverse_transform(predicted_prices)
-		predicted_prices = np.array(predicted_prices)
-		prediction_df[column] = predicted_prices
+		# A few concluding remarks here:
+		# 1. The predictor is quite bad, especially if you look at the next day 
+		# prediction, it missed the actual price by about 10%-13%
+		# Can you find the reason?
+		# 2. The code base at
+		# https://github.com/x4nth055/pythoncode-tutorials/tree/master/machine-learning/stock-prediction
+		# gives a much better prediction. Even though on the surface, it didn't seem 
+		# to be a big difference (both use Stacked LSTM)
+		# Again, can you explain it?
+		# A more advanced and quite different technique use CNN to analyse the images
+		# of the stock price changes to detect some patterns with the trend of
+		# the stock price:
+		# https://github.com/jason887/Using-Deep-Learning-Neural-Networks-and-Candlestick-Chart-Representation-to-Predict-Stock-Market
+		# Can you combine these different techniques for a better prediction??
 
-	return prediction_df
+	# Create dataframe of predictions
+	predicted_df = pd.DataFrame(index=dates, columns=feature_columns, data=prices)
 
-def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Volume']):
+	return predicted_df
+
+def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Adj Close', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	test_df			(df)	: The test data downloaded from yahoo
@@ -307,12 +299,6 @@ def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 
 	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
 	# Returns:
 	# 	fig				(fig)	: The figure object to be shown
-
-	#------------------------------------------------------------------------------
-	# Plot the test predictions
-	## To do:
-	# 1) Show chart of next few days (predicted)
-	#------------------------------------------------------------------------------
 
 	# Ensure that days is valid
 	assert days >= 0, 'days must be bigger than or equal to 1'
@@ -323,45 +309,54 @@ def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 
 		'High':'max',
 		'Low':'min',
 		'Close':'last',
+		'Adj Close':'last',
 		'Volume':'sum'
 	}
 	# Resample both the test data and the prediction data based on 'days'
 	resampled_test_df = test_df.resample(f'{days}d').agg(aggregation)
 	resampled_predicted_df = predicted_df.resample(f'{days}d').agg(aggregation)
-	
-	# Derrive the dates of of the graph from the dataset
-	date_range = f'{test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}'
 
+	# Put graphs together in figure
+	fig = make_subplots(
+		rows=2,
+		cols=1,
+		shared_xaxes=True,
+		vertical_spacing=0.02,
+		row_heights=[0.8, 0.2]
+	)
 	# Create candlestick graph of test data
-	test_data_graph = graphs.Candlestick(
+	fig.add_trace(graphs.Candlestick(
 		x=resampled_test_df.index,
 		open=resampled_test_df['Open'],
 		high=resampled_test_df['High'],
 		low=resampled_test_df['Low'],
 		close=resampled_test_df['Close'],
 		showlegend=False
-	)
+	), row=1, col=1)
 	# Create scatter graphs of predicted feature
-	predicted_data_graphs = []
 	for column in feature_columns:
-		graph = graphs.Scatter(
+		fig.add_trace(graphs.Scatter(
 			x=resampled_predicted_df.index,
 			y=resampled_predicted_df[column],
 			name=f'Predicted {column}'
-		)
-		predicted_data_graphs.append(graph)
-
-	# Put graphs together in figure
-	fig = graphs.Figure(data=([test_data_graph] + predicted_data_graphs))
+		), row=1, col=1)
+	# Create volume graph of test data
+	fig.add_trace(graphs.Bar(
+		x=resampled_test_df.index,
+		y=resampled_test_df['Volume'],
+		name='Volume',
+		showlegend=False
+	), row=2, col=1)
 	# Update figure titles
 	fig.update_layout(
-		title=f'{COMPANY} Share Prices {date_range}',
-		yaxis_title='Price ($)'
+		title=f'{COMPANY} Share Prices {test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}',
+		yaxis_title='Price ($)',
+		xaxis_rangeslider_visible=False
 	)
 
 	return fig
 
-def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Close']):
+def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Adj Close', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	test_df			(df)	: The test data downloaded from yahoo
@@ -370,12 +365,6 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
 	# Returns:
 	# 	fig				(fig)	: The figure object to be shown
-
-	#------------------------------------------------------------------------------
-	# Plot the test predictions
-	## To do:
-	# 1) Show chart of next few days (predicted)
-	#------------------------------------------------------------------------------
 
 	# Ensure that days is valid
 	assert days >= 0, 'days must be bigger than or equal to 1'
@@ -386,20 +375,18 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 		'High':'max',
 		'Low':'min',
 		'Close':'last',
+		'Adj Close':'last',
 		'Volume':'sum'
 	}
 	# Resample both the test data and the prediction data based on 'days'
 	resampled_test_df = test_df.resample(f'{days}d').agg(aggregation)
 	resampled_predicted_df = predicted_df.resample(f'{days}d').agg(aggregation)
-	
-	# Derrive the dates of of the graph from the dataset
-	date_range = f'{test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}'
 
 	# Create a box plot for each day
 	boxes = []
 	for date in resampled_test_df.index:
 		# Select the data for this day
-		day_data = resampled_test_df[resampled_test_df.index == date][['Open', 'High', 'Low', 'Close']]
+		day_data = resampled_test_df[resampled_test_df.index == date][['Open', 'High', 'Low', 'Close', 'Adj Close']]
 		# Create a box plot for this day's data
 		box = graphs.Box(
 			y=day_data.values[0],
@@ -407,7 +394,6 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 			showlegend=False
 		)
 		boxes.append(box)
-
 	# Create scatter graphs of predicted feature
 	predicted_data_graphs = []
 	for column in feature_columns:
@@ -417,19 +403,17 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 			name=f'Predicted {column}'
 		)
 		predicted_data_graphs.append(graph)
-
 	# Put graphs together in figure
 	fig = graphs.Figure(data=(boxes + predicted_data_graphs))
-
 	# Update figure titles
 	fig.update_layout(
-		title=f'{COMPANY} Share Prices {date_range}',
+		title=f'{COMPANY} Share Prices {test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}',
 		yaxis_title='Price ($)'
 	)
 
 	return fig
 
-def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close']):
+def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Uses model and data to assess prediction
 	# Params:
 	# 	test_df			(df)	: The test data downloaded from yahoo
@@ -449,61 +433,12 @@ def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close'
 
 	return feature_error
 
-def predict(model, scaler, model_inputs, sequence_length=60, days_forward=1):
-	# Uses model and data to make prediction
-	# Params:
-	# 	model				(model)	: The model previously generated to actually be tested
-	# 	scaler				(scaler): The scaler used to process the data so it can be de-normalised
-	# 	actual_prices		(list)	: The prices downloaded from yahoo to compare against
-	# 	sequence_length	(int)	: How far back the final prediction should look, default is 60 (e.g last 60 days of model inputs)
-	# 	days_forward		(int)	: How many days forward the prediction should be, default is 1 (e.g. next day)
-	# Returns:
-	# 	prediction			(list)	: The predicted price
-
-	# Get the last sequence_length days of the model_inputs
-	real_data = [model_inputs[len(model_inputs) - sequence_length:, 0]]
-	# Turn the real_data into a numpy array
-	real_data = np.array(real_data)
-	# Reshape the real_data into a 3D array
-	real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
-
-	predictions = []
-	for i in range(days_forward):
-		# Predict the price
-		prediction = model.predict(real_data)
-		# Add the prediction to the real_data
-		real_data = np.concatenate((real_data, prediction[:, np.newaxis, :]), axis=1)
-		# Remove the first value of real_data to keep the length the same
-		real_data = np.delete(real_data, 0, axis=1)
-		# Inverse transform the prediction to get the actual price
-		prediction = scaler.inverse_transform(prediction)
-		# Add the prediction to the predictions list
-		predictions.append(prediction)
-
-		# A few concluding remarks here:
-		# 1. The predictor is quite bad, especially if you look at the next day 
-		# prediction, it missed the actual price by about 10%-13%
-		# Can you find the reason?
-		# 2. The code base at
-		# https://github.com/x4nth055/pythoncode-tutorials/tree/master/machine-learning/stock-prediction
-		# gives a much better prediction. Even though on the surface, it didn't seem 
-		# to be a big difference (both use Stacked LSTM)
-		# Again, can you explain it?
-		# A more advanced and quite different technique use CNN to analyse the images
-		# of the stock price changes to detect some patterns with the trend of
-		# the stock price:
-		# https://github.com/jason887/Using-Deep-Learning-Neural-Networks-and-Candlestick-Chart-Representation-to-Predict-Stock-Market
-		# Can you combine these different techniques for a better prediction??
-
-	# Turn the predictions into a numpy array
-	predictions = np.array(predictions).reshape(-1, 1)
-	return predictions
-
 if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
-	END_DATE = datetime.now().strftime('%Y-%m-%d')
+	END_DATE = '2023-09-27'
+	SEQUENCE_LENGTH = 120
 	CHOSEN_FEATURE = 'Close'
 	REFRESH = False
 	GRAPH_DAYS = 7
@@ -511,8 +446,6 @@ if __name__ == '__main__':
 	
 	# Make model hyperparameters
 	hyperparameters = {
-		'sequence_length': 60,
-		'n_features': 1,
 		'cell': GRU,
 		'layer_size': [50, 50, 50],
 		'dropout': 0.2,
@@ -524,13 +457,13 @@ if __name__ == '__main__':
 	df = load_data(COMPANY, START_DATE, END_DATE, REFRESH)
 
 	# Prepare the data for training and testing
-	dataset = prepare_data(df, hyperparameters['sequence_length'], 0.1)
+	dataset = prepare_data(df, SEQUENCE_LENGTH, 0.1)
 
 	# Generate the model based on the training data
-	model = train_model(COMPANY, dataset['column_x_train'][CHOSEN_FEATURE], dataset['column_y_train'][CHOSEN_FEATURE], hyperparameters, REFRESH)
+	model = train_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
 
 	# Make df of predictions to compare against test data
-	prediction_df = predict_test(model, dataset['column_scaler'], dataset['column_x_test'], dataset['test_df'].index)
+	prediction_df = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
 
 	# Show candlestick graph of prices
 	candlestick(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
@@ -538,11 +471,14 @@ if __name__ == '__main__':
 	boxplot(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
 
 	# Calculate the average error for each feature
-	error = error(dataset['test_df'], prediction_df, [CHOSEN_FEATURE])
+	error = error(dataset['test_df'], prediction_df)
 	for column in error:
 		print(f'Average error for {column}: ${error[column][0]:.2f} or {error[column][1]:.2%}')
 
-	# Run the predictions based on the model and testing data
-	print(f'Predicting price in {FUTURE_DAYS} days')
-	predictions = predict(model, dataset['column_scaler'][CHOSEN_FEATURE], dataset['column_model_inputs'][CHOSEN_FEATURE], hyperparameters['sequence_length'], FUTURE_DAYS)
-	print(f'Predicted price in {len(predictions)} days: ${predictions[-1, 0]:.2f}')
+	# Make datime range for future predictions
+	tomorrow = datetime.strptime(END_DATE, '%Y-%m-%d') + timedelta(days=1)
+	dates = pd.date_range(tomorrow, periods=FUTURE_DAYS, name='Date')
+	# Predict the future prices
+	future_prices = predict(model, dataset['scaler'], dataset['model_inputs'], dates, FUTURE_DAYS)
+	for day, value in enumerate(future_prices[CHOSEN_FEATURE]):
+		print(f'Predicted {CHOSEN_FEATURE} price in {day + 1} day(s): ${value:.2f}')
