@@ -61,27 +61,27 @@ def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='
 def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Scales, normalizes and splits the data into training and testing data
 	# Params:
-	# 	df				(df)	: The dataframe to be processed
-	# 	sequence_length	(int)	: The historical sequence length used to predict
-	# 	split			(float)	: The percentage of data to be used for testing, default is 0.2
-	# 	feature_columns	(list)	: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# 	df				(df)		: The dataframe to be processed
+	# 	sequence_length	(int)		: The historical sequence length used to predict
+	# 	split			(float, str): The percentage of data to be used for testing or the date to split the data on
+	# 	feature_columns	(list)		: The list of features to use to feed into the model, default is everything grabbed from yahoo
+	# Returns:
+	# 	dataset			(dict)		: The dataset dictionary containing the df, train_df, test_df, scaler, x_train, y_train, x_test, y_test, model_inputs
 
 	# make sure that the passed feature_columns exist in the dataframe
-	for col in feature_columns:
-		assert col in df.columns, f'{col} does noxt exist in the dataframe.'
+	for column in feature_columns:
+		assert column in df.columns, f'{column} does noxt exist in the dataframe.'
 
-	try:
-		split_is_date = isinstance(datetime.strptime(split, '%Y-%m-%d'), datetime)
-	except:
-		split_is_date = False
+	# Determine whether split is a date or a percentage
+	split_is_date = isinstance(split, str) and isinstance(datetime.strptime(split, '%Y-%m-%d'), datetime)
 	split_is_float = isinstance(split, float) and 0 < split < 1
-	
+
 	# Ensure that split is valid
 	assert split_is_date or split_is_float, f'split must be a float between 0 and 1 or a string (\'yyyy-mm-dd\')'
 
 	# If split is false, split the dataframe into training and testing data based on the split
 	if split_is_float:
-		# Convert the split percentage to a index
+		# Convert the split percentage to an index
 		train_start = int((1 - split) * len(df))
 		# train_df contains all values before that index
 		train_df = df[:train_start]
@@ -94,20 +94,21 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 		# test_df contains all values after test_start_date
 		test_df = df[df.index > split]
 
+	# Scale the data
 	scaler = MinMaxScaler(feature_range=(0, 1))
 	scaled_data = scaler.fit_transform(df[feature_columns].values)
 
-	x_train, y_train = [], []
 	# Prepare training data
+	x_train, y_train = [], []
 	for i in range(sequence_length, len(train_df)):
 		# Add the previous sequence_length values to x_train
 		x_train.append(scaled_data[i - sequence_length: i])
 		# Add the current value to y_train
 		y_train.append(scaled_data[i])
 
-	x_test, y_test = [], []
 	# Prepare testing data
-	for i in range(len(train_df), len(scaled_data)):
+	x_test, y_test = [], []
+	for i in range(len(train_df), len(df)):
 		# Add the previous sequence_length values to x_test
 		x_test.append(scaled_data[i - sequence_length: i])
 		# Add the current value to y_test
@@ -117,13 +118,13 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 	x_train, y_train = np.array(x_train), np.array(y_train)
 	x_test, y_test = np.array(x_test), np.array(y_test)
 
+	# Create model inputs
+	model_inputs = x_test[-1]
+
 	# Reshape the data to be 3-dimensional in the form [number of samples, sequence length, number of features]
-	x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], len(feature_columns)))
-	x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], len(feature_columns)))
+	model_inputs = np.reshape(model_inputs, (1, sequence_length, len(feature_columns)))
 
-	model_inputs = x_test[-sequence_length:, 0]
-	model_inputs = np.reshape(model_inputs, (1, model_inputs.shape[0], len(feature_columns)))
-
+	# Create dataset dictionary
 	dataset = {
 		'stock_df': df.copy(),
 		'train_df': train_df,
@@ -153,24 +154,24 @@ def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, o
 	# Basic neural network
 	model = Sequential()
 	# Add layers to model based on the length of layer_size
-	for i in range(len(layer_size)):
+	for layer, size in enumerate(layer_size):
 		# Create cell based on cell type
-		if i == 0:
+		if layer == 0:
 			# Add input layer that needs input shape defined
 			model.add(InputLayer(input_shape=input_shape))
-			model.add(cell(units=layer_size[i], return_sequences=True))
+			model.add(cell(units=size, return_sequences=True))
 			# For som eadvances explanation of return_sequences:
 			# https://machinelearningmastery.com/return-sequences-and-return-states-for-lstms-in-keras/
 			# https://www.dlology.com/blog/how-to-use-return_state-or-return_sequences-in-keras/
 			# As explained there, for a stacked LSTM, you must set return_sequences=True 
 			# when stacking LSTM layers so that the next LSTM layer has a 
 			# three-dimensional sequence input. 
-		elif i == len(layer_size) - 1:
+		elif layer == len(layer_size) - 1:
 			# Add output layer that doesn't need a return sequence
-			model.add(cell(units=layer_size[i]))
+			model.add(cell(units=size))
 		else:
 			# Add hidden layer that needs a return sequence as it's a stacked LSTM but no input shape
-			model.add(cell(units=layer_size[i], return_sequences=True))
+			model.add(cell(units=size, return_sequences=True))
 		# Add dropout after each layer to prevent overfitting
 		model.add(Dropout(dropout))
 		# The Dropout layer randomly sets input units to 0 with a frequency of 
@@ -188,11 +189,11 @@ def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, o
 	
 	return model
 
-def train_model(x_train, y_train, x_test, y_test, hyperparameters, refresh=True, save=True, model_dir='model', checkpoint_dir='checkpoints', logs_dir='logs'):
+def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model', checkpoint_dir='checkpoints', logs_dir='logs'):
 	# Trains the model
 	# Params:
-	# 	x_train		(list)	: The x training data
-	# 	y_train		(list)	: The y training data
+	# 	x_train		(list)	: The x training data used to train the model
+	# 	y_train		(list)	: The y training data used to train the model
 	#	refresh 	(bool)	: Whether to retrain the model even if it exists, default is False
 	#	save		(bool)	: Whether to save the model locally if it doesn't already exist, default is True
 	#	model_dir	(str)	: Directory to store model, default is 'model'
@@ -203,31 +204,54 @@ def train_model(x_train, y_train, x_test, y_test, hyperparameters, refresh=True,
 	if not os.path.isdir(model_dir):
 		os.mkdir(model_dir)
 
-	# Creates checkpoint directory if it doesn't exist
-	if not os.path.isdir(checkpoint_dir):
-		os.mkdir(checkpoint_dir)
+	# # Creates checkpoint directory if it doesn't exist
+	# if not os.path.isdir(checkpoint_dir):
+	# 	os.mkdir(checkpoint_dir)
 
-	# Creates logs directory if it doesn't exist
-	if not os.path.isdir(logs_dir):
-		os.mkdir(logs_dir)
+	# # Creates logs directory if it doesn't exist
+	# if not os.path.isdir(logs_dir):
+	# 	os.mkdir(logs_dir)
 
-	# Model name to ensure model is unique
-	model_name = f"model_{x_train.shape[1:]}_{hyperparameters['cell'].__name__}_{'_'.join(map(str, hyperparameters['layer_size']))}_{hyperparameters['dropout']}_{hyperparameters['optimizer']}_{hyperparameters['loss']}"
+	# Create model name based on hyperparameters
+	model_name_parts = [
+		str(x_train.shape[1:]).replace(' ', ''),			# Input shape
+		hyperparameters['cell'].__name__,					# Cell type
+		'-'.join(map(str, hyperparameters['layer_size'])),	# Layer sizes
+		hyperparameters['dropout'],							# Dropout rate
+		hyperparameters['optimizer'],						# Optimizer
+		hyperparameters['loss']								# Loss function
+	]
+	# Join model name parts together
+	model_name = 'model_' + '_'.join(map(str, model_name_parts))
 
-	# Checks if data file with same data exists
-	if os.path.exists(os.path.join(model_dir, model_name + '.keras')) and not refresh:
-		# If file exists and data shouldn't be updated, import as pandas data frame object
-		# 'index_col=0' makes the date the index rather than making a new coloumn
-		model = load_model(os.path.join(model_dir, model_name + '.keras'))
+	# Checks if model file with same hyperparameters exists
+	if os.path.exists(os.path.join(model_dir, f'{model_name}.keras')) and not refresh:
+		# If file exists and model shouldn't be updated, import as keras model object
+		model = load_model(os.path.join(model_dir, f'{model_name}.keras'))
 		return model
 
 	# Create model based on hyperparameters
-	model = create_model(x_train.shape[1:], hyperparameters['cell'], hyperparameters['layer_size'], hyperparameters['dropout'], hyperparameters['optimizer'], hyperparameters['loss'])
+	model = create_model(
+		x_train.shape[1:],
+		hyperparameters['cell'],
+		hyperparameters['layer_size'],
+		hyperparameters['dropout'],
+		hyperparameters['optimizer'],
+		hyperparameters['loss']
+	)
 
-	# Save model checkpoints
-	checkpointer = ModelCheckpoint(os.path.join(checkpoint_dir, model_name + '.ckpt'), save_weights_only=True, save_best_only=True, verbose=1)
+	# # Save model checkpoints
+	# checkpointer = ModelCheckpoint(
+	# 	os.path.join(
+	# 		checkpoint_dir,
+	# 		model_name + '.ckpt'
+	# 	),
+	# 	save_weights_only=True,
+	# 	save_best_only=True,
+	# 	verbose=1
+	# )
 	# Save model logs
-	tensorboard = TensorBoard(log_dir=os.path.join(logs_dir, model_name))
+	# tensorboard = TensorBoard(log_dir=os.path.join(logs_dir, model_name))
 
 	# Train model
 	model.fit(
@@ -235,8 +259,7 @@ def train_model(x_train, y_train, x_test, y_test, hyperparameters, refresh=True,
 		y_train,
 		epochs=hyperparameters['eopchs'],
 		batch_size=hyperparameters['batch_size'],
-		validation_data=(x_test, y_test),
-		callbacks=[checkpointer, tensorboard],
+		# callbacks=[checkpointer, tensorboard],
 		verbose=1
 	)
 	# Other parameters to consider: How many rounds(epochs) are we going to 
@@ -253,40 +276,41 @@ def train_model(x_train, y_train, x_test, y_test, hyperparameters, refresh=True,
 
 	# Save model if saving is on
 	if save:
-		model.save(model_dir, model_name + '.keras')
+		model.save(os.path.join(model_dir, f'{model_name}.keras'))
 
 	return model
 
 def predict(model, scaler, x_test, dates, predictions=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
-	# 	model				(model)	: The model previously generated to actually be tested
-	# 	scaler				(scaler): The scaler used to process the data so it can be de-normalised
-	# 	x_test				(list)	: The x testing data
-	# 	dates				(list)	: The dates to be used for the predictions
-	# 	predictions			(int)	: The amount of days to predict, default is 1
-	# 	feature_columns		(list)	: The list of features to be predicted on, default is everything grabbed from yahoo
+	# 	model			(model)	: The model previously generated to actually be tested
+	# 	scaler			(scaler): The scaler used to process the data so it can be de-normalised
+	# 	x_test			(list)	: The x testing data
+	# 	dates			(list)	: The dates to be used as the index for the predicted_df
+	# 	predictions		(int)	: The amount of days ahead to predict, default is 1
+	# 	feature_columns	(list)	: The list of features to be used as the columns for the predicted_df, default is everything grabbed from yahoo
 	# Returns:
-	# 	predicted_df		(df)	: The predictions based on the test data
+	# 	predicted_df	(df)	: The predictions based on the test data
 
+	# Repeat the prediction for the number of days ahead
 	for i in range(predictions):
 		# Predict the price
 		prediction = model.predict(x_test)
-		# Add the prediction to the x_test
+		
+		# Add the prediction to the x_test so that it can be used to predict the next day
 		x_test = np.concatenate((x_test, prediction[:, np.newaxis, :]), axis=1)
-		# Remove the first value of x_test to keep the length the same
+		# Remove the first value of x_test to keep the shape correct
 		x_test = np.delete(x_test, 0, axis=1)
+		
 		# Inverse transform the prediction to get the actual price
 		prediction = scaler.inverse_transform(prediction)
-		# # Add the prediction to the predicted_df
-		# predicted_df.iloc[i] = prediction[0]
 
 		# Add the prediction to the prices
 		try:
-			# If prices doesn't exist, create it
+			# Test if prices exists
 			prices
 		except NameError:
-			# Set prices to the prediction
+			# If prices doesn't exist, create it
 			prices = prediction
 		else:
 			# Add the prediction to prices
@@ -321,6 +345,10 @@ def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 
 	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
 	# Returns:
 	# 	fig				(fig)	: The figure object to be shown
+
+	# make sure that the passed feature_columns exist in the dataframe
+	for column in feature_columns:
+		assert column in df.columns, f'{column} does noxt exist in the dataframe.'
 
 	# Ensure that days is valid
 	assert days >= 0, 'days must be bigger than or equal to 1'
@@ -388,6 +416,10 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	# Returns:
 	# 	fig				(fig)	: The figure object to be shown
 
+	# make sure that the passed feature_columns exist in the dataframe
+	for column in feature_columns:
+		assert column in df.columns, f'{column} does noxt exist in the dataframe.'
+
 	# Ensure that days is valid
 	assert days >= 0, 'days must be bigger than or equal to 1'
 
@@ -442,8 +474,9 @@ def error(test_df, predicted_df, feature_columns=['Open', 'High', 'Low', 'Close'
 	# 	predicted_df	(df)	: The predictions based on the test data
 	# 	feature_columns	(list)	: The list of features graphed from the prediction, default is everything grabbed from yahoo
 	# Returns:
-	# 	feature_error	(dict)	: The average error and average error percentage for each feature
+	# 	feature_error	(dict)	: The average error in dollars and percentage for each feature
 
+	# Create dictionary to store the average error and average error percentage for each feature
 	feature_error = {}
 	for column in feature_columns:
 		# Calculate the average error for each feature
@@ -459,8 +492,8 @@ if __name__ == '__main__':
 	# Default params that must be set
 	COMPANY = 'TSLA'
 	START_DATE = '2015-01-01'
-	END_DATE = '2023-09-27'
-	SEQUENCE_LENGTH = 120
+	END_DATE = '2023-09-29'
+	SPLIT = 0.1
 	CHOSEN_FEATURE = 'Close'
 	REFRESH = False
 	GRAPH_DAYS = 7
@@ -468,6 +501,7 @@ if __name__ == '__main__':
 	
 	# Make model hyperparameters
 	hyperparameters = {
+		'sequence_length': 120,
 		'cell': GRU,
 		'layer_size': [50, 50, 50],
 		'dropout': 0.2,
@@ -481,10 +515,10 @@ if __name__ == '__main__':
 	df = load_data(COMPANY, START_DATE, END_DATE, REFRESH)
 
 	# Prepare the data for training and testing
-	dataset = prepare_data(df, SEQUENCE_LENGTH, 0.1)
+	dataset = prepare_data(df, hyperparameters['sequence_length'], SPLIT)
 
 	# Generate the model based on the training data
-	model = train_model(dataset['x_train'], dataset['y_train'], dataset['x_test'], dataset['y_test'], hyperparameters, REFRESH)
+	model = train_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
 
 	# Make df of predictions to compare against test data
 	prediction_df = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
@@ -497,9 +531,12 @@ if __name__ == '__main__':
 	# Calculate the average error for each feature
 	error = error(dataset['test_df'], prediction_df)
 	for column in error:
-		print(f'Average error for {column}: ${error[column][0]:.2f} or {error[column][1]:.2%}')
+		if column == 'Volume':
+			print(f'Average error for {column}: {error[column][0]:.2f} or {error[column][1]:.2%}')
+		else:
+			print(f'Average error for {column}: ${error[column][0]:.2f} or {error[column][1]:.2%}')
 
-	# Make datime range for future predictions
+	# Make datetime range for future predictions
 	tomorrow = datetime.strptime(END_DATE, '%Y-%m-%d') + timedelta(days=1)
 	dates = pd.date_range(tomorrow, periods=FUTURE_DAYS, name='Date')
 	# Predict the future prices
