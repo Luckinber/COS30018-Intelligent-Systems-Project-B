@@ -29,7 +29,7 @@ def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='
 	#	start_date	(str)	: The start date for the data
 	#	end_date	(str)	: The end date for the data
 	#	refresh		(bool)	: Whether to redownload data even if it exists, default is True
-	#	save		(bool)	: Whet	her to save the data locally if it doesn't already exist, default is True
+	#	save		(bool)	: Whether to save the data locally if it doesn't already exist, default is True
 	#	data_dir	(str)	: Directory to store data, default is 'data'
 	# Returns:
 	# 	dataset		(dict)	: The dataset dictionary containing the df
@@ -118,10 +118,10 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 	x_train, y_train = np.array(x_train), np.array(y_train)
 	x_test, y_test = np.array(x_test), np.array(y_test)
 
-	# Create model inputs
+	# Create model inputs from the last sequence_length values from the original dataset
 	model_inputs = x_test[-1]
 
-	# Reshape the data to be 3-dimensional in the form [number of samples, sequence length, number of features]
+	# Reshape the model_inputs to be 3-dimensional in the form [number of samples, sequence length, number of features]
 	model_inputs = np.reshape(model_inputs, (1, sequence_length, len(feature_columns)))
 
 	# Create dataset dictionary
