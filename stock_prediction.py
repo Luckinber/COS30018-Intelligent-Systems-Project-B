@@ -8,19 +8,20 @@
 # By: NeuralNine
 
 import numpy as np
-import plotly.graph_objects as graphs
 import pandas as pd
-import tensorflow as tf
 import yfinance as yf
+import tensorflow as tf
+import tensorflow_probability as tfp
 import os
 
 from plotly.subplots import make_subplots
+from plotly.graph_objects import Candlestick, Box, Scatter, Bar, Figure
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, InputLayer, LSTM, SimpleRNN, GRU
 from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
+# from tensorflow_probability.sts import AutoregressiveIntegratedMovingAverage
 
 def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='data'):
 	# Loads data from Yahoo Finance source.
@@ -204,14 +205,6 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 	if not os.path.isdir(model_dir):
 		os.mkdir(model_dir)
 
-	# # Creates checkpoint directory if it doesn't exist
-	# if not os.path.isdir(checkpoint_dir):
-	# 	os.mkdir(checkpoint_dir)
-
-	# # Creates logs directory if it doesn't exist
-	# if not os.path.isdir(logs_dir):
-	# 	os.mkdir(logs_dir)
-
 	# Create model name based on hyperparameters
 	model_name_parts = [
 		str(x_train.shape[1:]).replace(' ', ''),			# Input shape
@@ -239,19 +232,6 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 		hyperparameters['optimizer'],
 		hyperparameters['loss']
 	)
-
-	# # Save model checkpoints
-	# checkpointer = ModelCheckpoint(
-	# 	os.path.join(
-	# 		checkpoint_dir,
-	# 		model_name + '.ckpt'
-	# 	),
-	# 	save_weights_only=True,
-	# 	save_best_only=True,
-	# 	verbose=1
-	# )
-	# Save model logs
-	# tensorboard = TensorBoard(log_dir=os.path.join(logs_dir, model_name))
 
 	# Train model
 	model.fit(
@@ -375,7 +355,7 @@ def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 
 		row_heights=[0.8, 0.2]
 	)
 	# Create candlestick graph of test data
-	fig.add_trace(graphs.Candlestick(
+	fig.add_trace(Candlestick(
 		x=resampled_test_df.index,
 		open=resampled_test_df['Open'],
 		high=resampled_test_df['High'],
@@ -385,13 +365,13 @@ def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 
 	), row=1, col=1)
 	# Create scatter graphs of predicted feature
 	for column in feature_columns:
-		fig.add_trace(graphs.Scatter(
+		fig.add_trace(Scatter(
 			x=resampled_predicted_df.index,
 			y=resampled_predicted_df[column],
 			name=f'Predicted {column}'
 		), row=1, col=1)
 	# Create volume graph of test data
-	fig.add_trace(graphs.Bar(
+	fig.add_trace(Bar(
 		x=resampled_test_df.index,
 		y=resampled_test_df['Volume'],
 		name='Volume',
@@ -442,7 +422,7 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 		# Select the data for this day
 		day_data = resampled_test_df[resampled_test_df.index == date][['Open', 'High', 'Low', 'Close', 'Adj Close']]
 		# Create a box plot for this day's data
-		box = graphs.Box(
+		box = Box(
 			y=day_data.values[0],
 			name=str(date),
 			showlegend=False
@@ -451,14 +431,14 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	# Create scatter graphs of predicted feature
 	predicted_data_graphs = []
 	for column in feature_columns:
-		graph = graphs.Scatter(
+		graph = Scatter(
 			x=resampled_predicted_df.index,
 			y=resampled_predicted_df[column],
 			name=f'Predicted {column}'
 		)
 		predicted_data_graphs.append(graph)
 	# Put graphs together in figure
-	fig = graphs.Figure(data=(boxes + predicted_data_graphs))
+	fig = Figure(data=(boxes + predicted_data_graphs))
 	# Update figure titles
 	fig.update_layout(
 		title=f'{COMPANY} Share Prices {test_df.index[0]:%b %Y} - {test_df.index[-1]:%b %Y}',
@@ -495,14 +475,14 @@ if __name__ == '__main__':
 	END_DATE = '2023-09-29'
 	SPLIT = 0.1
 	CHOSEN_FEATURE = 'Close'
-	REFRESH = False
+	REFRESH = True
 	GRAPH_DAYS = 7
 	FUTURE_DAYS = 7
 	
 	# Make model hyperparameters
 	hyperparameters = {
 		'sequence_length': 120,
-		'cell': GRU,
+		'cell': LSTM,
 		'layer_size': [50, 50, 50],
 		'dropout': 0.2,
 		'optimizer': 'adam',
@@ -520,8 +500,8 @@ if __name__ == '__main__':
 	# Generate the model based on the training data
 	model = train_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
 
-	# Make df of predictions to compare against test data
-	prediction_df = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
+	# Make df of predictions to compare xagainst test data
+	prediction_df1 = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
 
 	# Show candlestick graph of prices
 	candlestick(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()

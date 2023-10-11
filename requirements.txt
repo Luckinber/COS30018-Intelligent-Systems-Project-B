@@ -1,8 +1,9 @@
 numpy
+pandas
+yfinance
 plotly
 nbformat
-pandas
 tensorflow
+tensorflow_probability
 scikit-learn
 pandas-datareader
-yfinance
