@@ -21,7 +21,7 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, InputLayer, LSTM, SimpleRNN, GRU
 from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
-# from tensorflow_probability.sts import AutoregressiveIntegratedMovingAverage
+# from statsmodels.tsa.arima.model import ARIMA
 
 def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='data'):
 	# Loads data from Yahoo Finance source.
@@ -140,7 +140,7 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 
 	return dataset
 
-def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, optimizer='adam', loss='mean_squared_error', feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+def create_neural_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, optimizer='adam', loss='mean_squared_error', feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Builds the model
 	# Params:
 	# 	input_shape	(list)	: The shape of the input data
@@ -190,7 +190,7 @@ def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, o
 	
 	return model
 
-def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model', checkpoint_dir='checkpoints', logs_dir='logs'):
+def train_neural_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model', checkpoint_dir='checkpoints', logs_dir='logs'):
 	# Trains the model
 	# Params:
 	# 	x_train		(list)	: The x training data used to train the model
@@ -260,6 +260,36 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 
 	return model
 
+def create_arima_model(train, order=(5, 1, 0)):
+	# Builds the ARIMA model
+	# Params:
+	# 	train		(list)	: The training data used to train the model
+	# 	order		(tuple)	: The order of the model, default is (5, 1, 0)
+	# Returns:
+	# 	model		(model)	: The model to be trained
+
+	# Create model
+	model = ARIMA(train, order=order)
+
+	return model
+
+def train_arima_model(model, train, order=(5, 1, 0)):
+	# Trains the model
+	# Params:
+	# 	model		(model)	: The model to be trained
+	# 	train		(list)	: The training data used to train the model
+	# 	order		(tuple)	: The order of the model, default is (5, 1, 0)
+	# Returns:
+	# 	model		(model)	: The trained model
+
+	# Create model	
+	model = create_arima_model(train, order)
+
+	# Train model
+	model = model.fit(train)
+
+	return model
+
 def predict(model, scaler, x_test, dates, predictions=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
@@ -316,6 +346,32 @@ def predict(model, scaler, x_test, dates, predictions=1, feature_columns=['Open'
 
 	return predicted_df
 
+def resample_df(df, days):
+	# Resamples the dataframe based on the days
+	# Params:
+	# 	df				(df)	: The dataframe to be resampled
+	# 	days			(int)	: The amount of days to resample by
+	# Returns:
+	# 	resampled_df	(df)	: The resampled dataframe
+
+	# Ensure that days is valid
+	assert days >= 0, 'days must be bigger than or equal to 1'
+
+	# Tell how the pd resample should treat the different vales
+	aggregation = {
+		'Open':'first',
+		'High':'max',
+		'Low':'min',
+		'Close':'last',
+		'Adj Close':'last',
+		'Volume':'sum'
+	}
+
+	# Resample the dataframe based on 'days'
+	resampled_df = df.resample(f'{days}d').agg(aggregation)
+
+	return resampled_df
+
 def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Adj Close', 'Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
@@ -330,21 +386,9 @@ def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 
 	for column in feature_columns:
 		assert column in df.columns, f'{column} does noxt exist in the dataframe.'
 
-	# Ensure that days is valid
-	assert days >= 0, 'days must be bigger than or equal to 1'
-
-	# Tell how the pd resample should treat the different vales
-	aggregation = {
-		'Open':'first',
-		'High':'max',
-		'Low':'min',
-		'Close':'last',
-		'Adj Close':'last',
-		'Volume':'sum'
-	}
 	# Resample both the test data and the prediction data based on 'days'
-	resampled_test_df = test_df.resample(f'{days}d').agg(aggregation)
-	resampled_predicted_df = predicted_df.resample(f'{days}d').agg(aggregation)
+	resampled_test_df = resample_df(test_df, days)
+	resampled_predicted_df = resample_df(predicted_df, days)
 
 	# Put graphs together in figure
 	fig = make_subplots(
@@ -400,21 +444,9 @@ def boxplot(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low
 	for column in feature_columns:
 		assert column in df.columns, f'{column} does noxt exist in the dataframe.'
 
-	# Ensure that days is valid
-	assert days >= 0, 'days must be bigger than or equal to 1'
-
-	# Tell how the pd resample should treat the different vales
-	aggregation = {
-		'Open':'first',
-		'High':'max',
-		'Low':'min',
-		'Close':'last',
-		'Adj Close':'last',
-		'Volume':'sum'
-	}
 	# Resample both the test data and the prediction data based on 'days'
-	resampled_test_df = test_df.resample(f'{days}d').agg(aggregation)
-	resampled_predicted_df = predicted_df.resample(f'{days}d').agg(aggregation)
+	resampled_test_df = resample_df(test_df, days)
+	resampled_predicted_df = resample_df(predicted_df, days)
 
 	# Create a box plot for each day
 	boxes = []
@@ -475,7 +507,7 @@ if __name__ == '__main__':
 	END_DATE = '2023-09-29'
 	SPLIT = 0.1
 	CHOSEN_FEATURE = 'Close'
-	REFRESH = True
+	REFRESH = False
 	GRAPH_DAYS = 7
 	FUTURE_DAYS = 7
 	
@@ -498,10 +530,10 @@ if __name__ == '__main__':
 	dataset = prepare_data(df, hyperparameters['sequence_length'], SPLIT)
 
 	# Generate the model based on the training data
-	model = train_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
+	model = train_neural_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
 
 	# Make df of predictions to compare xagainst test data
-	prediction_df1 = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
+	prediction_df = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
 
 	# Show candlestick graph of prices
 	candlestick(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
