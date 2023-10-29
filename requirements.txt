@@ -3,6 +3,7 @@ plotly
 nbformat
 pandas
 tensorflow
+statsmodels
 scikit-learn
 pandas-datareader
 yfinance

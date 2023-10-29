@@ -21,6 +21,7 @@ from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Dense, Dropout, InputLayer, LSTM, SimpleRNN, GRU
 from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard
+from statsmodels.tsa.arima.model import ARIMA
 
 def load_data(company, start_date, end_date, refresh=True, save=True, data_dir='data'):
 	# Loads data from Yahoo Finance source.
@@ -83,15 +84,15 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 	if split_is_float:
 		# Convert the split percentage to an index
 		train_start = int((1 - split) * len(df))
-		# train_df contains all values before that index
+		# Get all values before that index
 		train_df = df[:train_start]
-		# test_df contains all values after that index
+		# Get all values after that index
 		test_df = df[train_start:]
 	# If split is a date, split the dataframe into training and testing based on that date
 	else:
-		# train_df contains all values before test_start_date
+		# Get all values before test_start_date
 		train_df = df[df.index < split]
-		# test_df contains all values after test_start_date
+		# Get all values after test_start_date
 		test_df = df[df.index > split]
 
 	# Scale the data
@@ -126,7 +127,7 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 
 	# Create dataset dictionary
 	dataset = {
-		'stock_df': df.copy(),
+		'stock_df': df,
 		'train_df': train_df,
 		'test_df': test_df,
 		'scaler': scaler,
@@ -139,10 +140,11 @@ def prepare_data(df, sequence_length=60, split=0.2, feature_columns=['Open', 'Hi
 
 	return dataset
 
-def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, optimizer='adam', loss='mean_squared_error', feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+def create_neural_model(input_shape, features, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, optimizer='adam', loss='mean_squared_error'):
 	# Builds the model
 	# Params:
 	# 	input_shape	(list)	: The shape of the input data
+	# 	features	(int)	: The amount of features in the data
 	# 	cell		(func)	: The type of cell to use in the model, default is LSTM
 	# 	layer_size	(list)	: The size of each layer in the model, default is [50, 50, 50]
 	# 	dropout		(float)	: The dropout rate to use in the model, default is 0.2
@@ -174,22 +176,14 @@ def create_model(input_shape, cell=LSTM, layer_size=[50, 50, 50], dropout=0.2, o
 			model.add(cell(units=size, return_sequences=True))
 		# Add dropout after each layer to prevent overfitting
 		model.add(Dropout(dropout))
-		# The Dropout layer randomly sets input units to 0 with a frequency of 
-		# rate (= 0.2 above) at each step during training time, which helps 
-		# prevent overfitting (one of the major problems of ML).
 	# Add final dense layer to output prediction
-	model.add(Dense(len(feature_columns), activation='linear'))
+	model.add(Dense(features, activation='linear'))
 	# Compile model with given optimizer and loss function
 	model.compile(optimizer=optimizer, loss=loss)
-	# The optimizer and loss are two important parameters when building an 
-	# ANN model. Choosing a different optimizer/loss can affect the prediction
-	# quality significantly. You should try other settings to learn; e.g.
-	# optimizer='rmsprop'/'sgd'/'adadelta'/...
-	# loss='mean_absolute_error'/'huber_loss'/'cosine_similarity'/...
 	
 	return model
 
-def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model', checkpoint_dir='checkpoints', logs_dir='logs'):
+def train_neural_model(x_train, y_train, hyperparameters, refresh=True, save=True, model_dir='model'):
 	# Trains the model
 	# Params:
 	# 	x_train		(list)	: The x training data used to train the model
@@ -203,14 +197,6 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 	# Creates model directory if it doesn't exist
 	if not os.path.isdir(model_dir):
 		os.mkdir(model_dir)
-
-	# # Creates checkpoint directory if it doesn't exist
-	# if not os.path.isdir(checkpoint_dir):
-	# 	os.mkdir(checkpoint_dir)
-
-	# # Creates logs directory if it doesn't exist
-	# if not os.path.isdir(logs_dir):
-	# 	os.mkdir(logs_dir)
 
 	# Create model name based on hyperparameters
 	model_name_parts = [
@@ -231,8 +217,9 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 		return model
 
 	# Create model based on hyperparameters
-	model = create_model(
+	model = create_neural_model(
 		x_train.shape[1:],
+		x_train.shape[-1],
 		hyperparameters['cell'],
 		hyperparameters['layer_size'],
 		hyperparameters['dropout'],
@@ -240,39 +227,14 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 		hyperparameters['loss']
 	)
 
-	# # Save model checkpoints
-	# checkpointer = ModelCheckpoint(
-	# 	os.path.join(
-	# 		checkpoint_dir,
-	# 		model_name + '.ckpt'
-	# 	),
-	# 	save_weights_only=True,
-	# 	save_best_only=True,
-	# 	verbose=1
-	# )
-	# Save model logs
-	# tensorboard = TensorBoard(log_dir=os.path.join(logs_dir, model_name))
-
 	# Train model
 	model.fit(
 		x_train,
 		y_train,
 		epochs=hyperparameters['eopchs'],
 		batch_size=hyperparameters['batch_size'],
-		# callbacks=[checkpointer, tensorboard],
 		verbose=1
 	)
-	# Other parameters to consider: How many rounds(epochs) are we going to 
-	# train our model? Typically, the more the better, but be careful about
-	# overfitting!
-	# What about batch_size? Well, again, please refer to 
-	# Lecture Week 6 (COS30018): If you update your model for each and every 
-	# input sample, then there are potentially 2 issues: 1. If you training 
-	# data is very big (billions of input samples) then it will take VERY long;
-	# 2. Each and every input can immediately makes changes to your model
-	# (a souce of overfitting). Thus, we do this in batches: We'll look at
-	# the aggreated errors/losses from a batch of, say, 32 input samples
-	# and update our model based on this aggregated loss.
 
 	# Save model if saving is on
 	if save:
@@ -280,20 +242,40 @@ def train_model(x_train, y_train, hyperparameters, refresh=True, save=True, mode
 
 	return model
 
-def predict(model, scaler, x_test, dates, predictions=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+def train_arima_model(train, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+	# Trains the model
+	# Params:
+	# 	train			(df)	: The x training data used to train the model
+	# 	feature_columns	(list)	: The list of features to be used as the columns for the predicted_df, default is everything grabbed from yahoo
+	# Returns:
+	# 	model			(model)	: The trained model
+
+	# Create dictionary for storing the models for each feature
+	models = {}
+	# Train a model for each feature
+	for column in feature_columns:
+		# Determine the order of the ARIMA model
+		# order = auto_arima(x_train[column], trace=True, error_action='ignore', suppress_warnings=True).order
+		order = (3, 1, 3)
+		# Create ARIMA model
+		models[column] = ARIMA(train[column], order=order).fit()
+
+	return models
+
+def predict(model, scaler, x_test, dates, days=1, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
 	# Uses model and data to make prediction
 	# Params:
 	# 	model			(model)	: The model previously generated to actually be tested
 	# 	scaler			(scaler): The scaler used to process the data so it can be de-normalised
 	# 	x_test			(list)	: The x testing data
 	# 	dates			(list)	: The dates to be used as the index for the predicted_df
-	# 	predictions		(int)	: The amount of days ahead to predict, default is 1
+	# 	days		(int)	: The amount of days ahead to predict, default is 1
 	# 	feature_columns	(list)	: The list of features to be used as the columns for the predicted_df, default is everything grabbed from yahoo
 	# Returns:
 	# 	predicted_df	(df)	: The predictions based on the test data
 
 	# Repeat the prediction for the number of days ahead
-	for i in range(predictions):
+	for i in range(days):
 		# Predict the price
 		prediction = model.predict(x_test)
 		
@@ -316,25 +298,42 @@ def predict(model, scaler, x_test, dates, predictions=1, feature_columns=['Open'
 			# Add the prediction to prices
 			prices = np.vstack((prices, prediction))
 
-		# A few concluding remarks here:
-		# 1. The predictor is quite bad, especially if you look at the next day 
-		# prediction, it missed the actual price by about 10%-13%
-		# Can you find the reason?
-		# 2. The code base at
-		# https://github.com/x4nth055/pythoncode-tutorials/tree/master/machine-learning/stock-prediction
-		# gives a much better prediction. Even though on the surface, it didn't seem 
-		# to be a big difference (both use Stacked LSTM)
-		# Again, can you explain it?
-		# A more advanced and quite different technique use CNN to analyse the images
-		# of the stock price changes to detect some patterns with the trend of
-		# the stock price:
-		# https://github.com/jason887/Using-Deep-Learning-Neural-Networks-and-Candlestick-Chart-Representation-to-Predict-Stock-Market
-		# Can you combine these different techniques for a better prediction??
-
 	# Create dataframe of predictions
 	predicted_df = pd.DataFrame(index=dates, columns=feature_columns, data=prices)
 
 	return predicted_df
+
+def predict_arima(model, df, days=0, feature_columns=['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']):
+	# Uses model and data to make prediction
+	# Params:
+	# 	model			(model)	: The model previously generated to actually be tested
+	# 	df				(df)	: The dataframe to be used to predict
+	# 	days			(int)	: The amount of days ahead to predict, default is 1
+	# 	feature_columns	(list)	: The list of features to be used as the columns for the predicted_df, default is everything grabbed from yahoo
+	# Returns:
+	# 	predicted_df	(df)	: The predictions based on the test data
+
+	# Repeat the prediction for each feature
+	for column in feature_columns:
+		# Predict the prices
+		prediction = model[column].predict(end=len(df) + days - 1, typ='levels', dynamic=False)
+		# Add the prediction to the array
+		prediction = np.array(prediction)
+		# Reshape the prediction to be 2-dimensional
+		prediction = prediction.reshape(-1, 1)
+		# Test is predictions exists
+		try:
+			predictions
+		# If predictions doesn't exist, create it
+		except NameError:
+			predictions = prediction
+		# If predictions does exist, add the prediction to it
+		else:
+			predictions = np.concatenate((predictions, prediction), axis=1)
+
+	# Create dataframe of predictions
+	prediction_df = pd.DataFrame(index=df.index, columns=df.columns, data=predictions)
+	return prediction_df
 
 def candlestick(test_df, predicted_df, days=1, feature_columns=['Open', 'High', 'Low', 'Adj Close', 'Close', 'Volume']):
 	# Uses model and data to make prediction
@@ -494,7 +493,7 @@ if __name__ == '__main__':
 	START_DATE = '2015-01-01'
 	END_DATE = '2023-09-29'
 	SPLIT = 0.1
-	CHOSEN_FEATURE = 'Close'
+	CHOSEN_FEATURE = 'Adj Close'
 	REFRESH = False
 	GRAPH_DAYS = 7
 	FUTURE_DAYS = 7
@@ -517,11 +516,12 @@ if __name__ == '__main__':
 	# Prepare the data for training and testing
 	dataset = prepare_data(df, hyperparameters['sequence_length'], SPLIT)
 
-	# Generate the model based on the training data
-	model = train_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
+	# Generate the models based on the training data
+	neural_model = train_neural_model(dataset['x_train'], dataset['y_train'], hyperparameters, REFRESH)
+	arima_model_features = train_arima_model(dataset['train_df'])
 
 	# Make df of predictions to compare against test data
-	prediction_df = predict(model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
+	prediction_df = predict(neural_model, dataset['scaler'], dataset['x_test'], dataset['test_df'].index)
 
 	# Show candlestick graph of prices
 	candlestick(dataset['test_df'], prediction_df, GRAPH_DAYS, [CHOSEN_FEATURE]).show()
@@ -540,6 +540,6 @@ if __name__ == '__main__':
 	tomorrow = datetime.strptime(END_DATE, '%Y-%m-%d') + timedelta(days=1)
 	dates = pd.date_range(tomorrow, periods=FUTURE_DAYS, name='Date')
 	# Predict the future prices
-	future_prices = predict(model, dataset['scaler'], dataset['model_inputs'], dates, FUTURE_DAYS)
+	future_prices = predict(neural_model, dataset['scaler'], dataset['model_inputs'], dates, FUTURE_DAYS)
 	for day, value in enumerate(future_prices[CHOSEN_FEATURE]):
 		print(f'Predicted {CHOSEN_FEATURE} price in {day + 1} day(s): ${value:.2f}')
